@@ -10,4 +10,8 @@ export const BOT_COMMANDS = [
     command: "clear",
     description: "Clear recent messages, keep only the menu",
   },
+  {
+    command: "save",
+    description: "Save a note, or upload a .txt/.md file",
+  },
 ] as const;

@@ -234,6 +234,7 @@ describe("handleSetCommandsRequest", () => {
       "start",
       "search",
       "clear",
+      "save",
     ]);
   });
 
