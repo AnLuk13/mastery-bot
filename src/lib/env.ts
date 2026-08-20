@@ -27,6 +27,8 @@ const baseSchema = z.object({
   GITHUB_BRANCH: z.string().min(1).default("main"),
   GITHUB_CONTENT_PATH: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
+  GROQ_API_KEY: z.string().min(1, "is required"),
+  GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
 });
 
 const envSchema = baseSchema.superRefine((value, ctx) => {

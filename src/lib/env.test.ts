@@ -8,6 +8,7 @@ const baseValidLocalEnv = {
   ALLOWED_TELEGRAM_USER_IDS: "123,456",
   CONTENT_PROVIDER: "local",
   CONTENT_ROOT: "C:\\Users\\antonio\\Desktop\\mastery",
+  GROQ_API_KEY: "test-groq-key",
 } satisfies Record<string, string>;
 
 const baseValidGithubEnv = {
@@ -19,6 +20,7 @@ const baseValidGithubEnv = {
   GITHUB_OWNER: "antonio",
   GITHUB_REPOSITORY: "mastery",
   GITHUB_CONTENT_PATH: "",
+  GROQ_API_KEY: "test-groq-key",
 } satisfies Record<string, string>;
 
 describe("parseEnv", () => {
@@ -60,5 +62,15 @@ describe("parseEnv", () => {
   it("rejects a missing TELEGRAM_BOT_TOKEN", () => {
     const { TELEGRAM_BOT_TOKEN, ...rest } = baseValidLocalEnv;
     expect(() => parseEnv(rest)).toThrowError(/TELEGRAM_BOT_TOKEN/);
+  });
+
+  it("rejects a missing GROQ_API_KEY", () => {
+    const { GROQ_API_KEY, ...rest } = baseValidLocalEnv;
+    expect(() => parseEnv(rest)).toThrowError(/GROQ_API_KEY/);
+  });
+
+  it("defaults GROQ_MODEL when not set", () => {
+    const env = parseEnv(baseValidLocalEnv);
+    expect(env.GROQ_MODEL).toBe("openai/gpt-oss-120b");
   });
 });

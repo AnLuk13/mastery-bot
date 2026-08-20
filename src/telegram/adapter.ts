@@ -17,6 +17,7 @@ export function adaptContext(ctx: Context): BotContext {
     callbackData: ctx.callbackQuery?.data,
     commandArgs: typeof ctx.match === "string" ? ctx.match : undefined,
     messageId: ctx.callbackQuery?.message?.message_id,
+    messageText: ctx.callbackQuery ? undefined : ctx.message?.text,
 
     async sendMessage(text, keyboard, parseMode) {
       await ctx.reply(text, replyOptions(keyboard, parseMode));
@@ -33,6 +34,14 @@ export function adaptContext(ctx: Context): BotContext {
         }
       }
       await ctx.reply(text, replyOptions(keyboard, parseMode));
+    },
+
+    async sendTyping() {
+      try {
+        await ctx.replyWithChatAction("typing");
+      } catch {
+        // Best-effort only: never blocks the actual reply.
+      }
     },
 
     async answerCallbackQuery(text, showAlert) {

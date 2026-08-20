@@ -1,6 +1,9 @@
 import type { Bot } from "grammy";
 import { createContentProvider } from "@/content";
 import { getEnv } from "@/lib/env";
+import { embedText } from "@/rag/embeddingModel";
+import { getEmbeddingsIndex } from "@/rag/embeddingsIndex";
+import { GroqClient } from "@/rag/groqClient";
 import { createBot } from "./bot";
 
 /**
@@ -19,6 +22,14 @@ function getBot(): Bot {
       token: env.TELEGRAM_BOT_TOKEN,
       contentProvider: createContentProvider(env),
       allowedUserIds: env.ALLOWED_TELEGRAM_USER_IDS,
+      askDeps: {
+        embed: embedText,
+        index: getEmbeddingsIndex(),
+        groq: new GroqClient({
+          apiKey: env.GROQ_API_KEY,
+          model: env.GROQ_MODEL,
+        }),
+      },
     });
   }
   return bot;

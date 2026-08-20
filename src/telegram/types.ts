@@ -14,6 +14,8 @@ export interface BotContext {
   readonly commandArgs: string | undefined;
   /** message_id of the message this callback is attached to; undefined for a plain command. */
   readonly messageId: number | undefined;
+  /** Text of an incoming plain message; undefined for callbacks and commands. */
+  readonly messageText: string | undefined;
   sendMessage(
     text: string,
     keyboard?: InlineKeyboard,
@@ -29,4 +31,6 @@ export interface BotContext {
   answerCallbackQuery(text?: string, showAlert?: boolean): Promise<void>;
   /** Best-effort deletes `count` consecutive messages starting at `fromMessageId`; failures on individual IDs are swallowed. */
   deleteMessages(fromMessageId: number, count: number): Promise<void>;
+  /** Best-effort "typing…" indicator; never blocks or throws. */
+  sendTyping(): Promise<void>;
 }

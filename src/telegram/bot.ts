@@ -1,8 +1,10 @@
 import { Bot, type BotConfig, type Context } from "grammy";
 import type { ContentProvider } from "@/content";
+import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import { adaptContext } from "./adapter";
 import { enforceAuthorization } from "./auth";
 import { decodeCallbackData } from "./callbackData";
+import { createAskHandler } from "./handlers/ask";
 import { createDocumentCallbackHandler } from "./handlers/document";
 import { renderDirectory } from "./handlers/navigation";
 import {
@@ -10,12 +12,17 @@ import {
   handleSearchHelpCallback,
 } from "./handlers/search";
 import { createStartHandler } from "./handlers/start";
-import { INVALID_NAVIGATION_MESSAGE, TOO_LONG_MESSAGE } from "./userMessages";
+import {
+  INVALID_NAVIGATION_MESSAGE,
+  TOO_LONG_MESSAGE,
+  UNKNOWN_COMMAND_MESSAGE,
+} from "./userMessages";
 
 export interface CreateBotOptions {
   token: string;
   contentProvider: ContentProvider;
   allowedUserIds: readonly number[];
+  askDeps: AnswerQuestionDeps;
   /** Pass to skip grammY's getMe network call, e.g. in tests. */
   botInfo?: BotConfig<Context>["botInfo"];
 }
@@ -44,6 +51,18 @@ export function createBot(options: CreateBotOptions): Bot {
 
   bot.command("search", async (grammyCtx) => {
     await createSearchCommandHandler(contentProvider)(adaptContext(grammyCtx));
+  });
+
+  const askHandler = createAskHandler(options.askDeps);
+  bot.on("message:text", async (grammyCtx) => {
+    const text = grammyCtx.message.text;
+    if (text.startsWith("/")) {
+      // An unrecognized command (the known ones above already returned without
+      // calling next()) — don't treat it as a question to the AI.
+      await adaptContext(grammyCtx).sendMessage(UNKNOWN_COMMAND_MESSAGE);
+      return;
+    }
+    await askHandler(adaptContext(grammyCtx));
   });
 
   bot.on("callback_query:data", async (grammyCtx) => {

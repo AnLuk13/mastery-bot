@@ -9,6 +9,7 @@ const baseEnvFields = {
   TELEGRAM_WEBHOOK_SECRET: "test-secret",
   TELEGRAM_SETUP_SECRET: "test-setup-secret",
   ALLOWED_TELEGRAM_USER_IDS: "123",
+  GROQ_API_KEY: "test-groq-key",
 };
 
 describe("createContentProvider", () => {

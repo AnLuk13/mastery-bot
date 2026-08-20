@@ -2,3 +2,8 @@ node_modules
 .next
 coverage
 package-lock.json
+
+# Vendored model files and generated data — not hand-authored, reformatting
+# would bloat or corrupt them for no benefit.
+public/models
+src/rag/data/embeddingsIndex.json

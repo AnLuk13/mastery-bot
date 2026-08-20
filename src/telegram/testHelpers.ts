@@ -25,6 +25,7 @@ export interface FakeBotContext {
   updateMessageCalls: RecordedCall[];
   answerCallbackQueryCalls: RecordedAnswer[];
   deleteMessagesCalls: RecordedDeleteMessages[];
+  sendTypingCalls: number[];
 }
 
 export function createFakeBotContext(
@@ -33,18 +34,21 @@ export function createFakeBotContext(
     callbackData: string;
     commandArgs: string;
     messageId: number;
+    messageText: string;
   }> = {},
 ): FakeBotContext {
   const sendMessageCalls: RecordedCall[] = [];
   const updateMessageCalls: RecordedCall[] = [];
   const answerCallbackQueryCalls: RecordedAnswer[] = [];
   const deleteMessagesCalls: RecordedDeleteMessages[] = [];
+  const sendTypingCalls: number[] = [];
 
   const ctx: BotContext = {
     userId: overrides.userId,
     callbackData: overrides.callbackData,
     commandArgs: overrides.commandArgs,
     messageId: overrides.messageId,
+    messageText: overrides.messageText,
     async sendMessage(text, keyboard, parseMode) {
       sendMessageCalls.push({ text, keyboard, parseMode });
     },
@@ -57,6 +61,9 @@ export function createFakeBotContext(
     async deleteMessages(fromMessageId, count) {
       deleteMessagesCalls.push({ fromMessageId, count });
     },
+    async sendTyping() {
+      sendTypingCalls.push(sendTypingCalls.length);
+    },
   };
 
   return {
@@ -65,6 +72,7 @@ export function createFakeBotContext(
     updateMessageCalls,
     answerCallbackQueryCalls,
     deleteMessagesCalls,
+    sendTypingCalls,
   };
 }
 

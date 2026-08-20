@@ -1,7 +1,15 @@
 import { Bot } from "grammy";
 import { describe, expect, it } from "vitest";
+import { GroqClient } from "@/rag/groqClient";
+import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import { createFakeContentProvider } from "./testHelpers";
 import { createBot } from "./bot";
+
+const fakeAskDeps: AnswerQuestionDeps = {
+  embed: async () => [],
+  index: { model: "test-model", dimensions: 0, chunks: [] },
+  groq: new GroqClient({ apiKey: "test-key", model: "test-model" }),
+};
 
 /**
  * grammY's Context/Api types make a fully offline handleUpdate() dispatch
@@ -36,6 +44,7 @@ describe("createBot", () => {
       token: "test-token",
       contentProvider: createFakeContentProvider(),
       allowedUserIds: [1],
+      askDeps: fakeAskDeps,
       botInfo: fakeBotInfo,
     });
 
