@@ -21,6 +21,11 @@ export async function renderDirectory(
   provider: ContentProvider,
   canonicalPath: string,
 ): Promise<void> {
+  // Acknowledge before doing any slow work (GitHub fetch, message edit): Telegram
+  // expires a callback query after a short window, and answering late causes it to
+  // retry-deliver the update, compounding the delay. See webhookHandler design notes.
+  await ctx.answerCallbackQuery();
+
   try {
     const entries = await provider.listDirectory(canonicalPath);
     const keyboard = buildDirectoryKeyboard(entries, canonicalPath);
@@ -28,7 +33,6 @@ export async function renderDirectory(
   } catch (error) {
     await ctx.updateMessage(describeContentError(error), homeOnlyKeyboard);
   }
-  await ctx.answerCallbackQuery();
 }
 
 export function createDirectoryCallbackHandler(provider: ContentProvider) {

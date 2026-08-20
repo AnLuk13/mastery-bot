@@ -75,6 +75,26 @@ describe("renderDirectory", () => {
     });
     expect(answerCallbackQueryCalls).toHaveLength(1);
   });
+
+  it("acknowledges the callback immediately, before fetching from the provider (avoids Telegram's callback-expiry error)", async () => {
+    const callOrder: string[] = [];
+    const provider = createFakeContentProvider({
+      listDirectory: async () => {
+        callOrder.push("listDirectory");
+        return entries;
+      },
+    });
+    const { ctx } = createFakeBotContext();
+    const originalAnswer = ctx.answerCallbackQuery.bind(ctx);
+    ctx.answerCallbackQuery = async (...args) => {
+      callOrder.push("answerCallbackQuery");
+      await originalAnswer(...args);
+    };
+
+    await renderDirectory(ctx, provider, "networking-mastery");
+
+    expect(callOrder).toEqual(["answerCallbackQuery", "listDirectory"]);
+  });
 });
 
 describe("createDirectoryCallbackHandler", () => {

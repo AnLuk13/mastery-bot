@@ -90,7 +90,27 @@ describe("createDocumentCallbackHandler", () => {
     expect(sendMessageCalls.at(-1)?.keyboard).toBeDefined();
   });
 
-  it("shows an alert without touching the current message when the document is missing", async () => {
+  it("acknowledges the callback immediately, before any slow work, regardless of outcome", async () => {
+    const callOrder: string[] = [];
+    const provider = createFakeContentProvider({
+      getDocument: async () => {
+        callOrder.push("getDocument");
+        return makeDocument();
+      },
+    });
+    const { ctx } = createFakeBotContext();
+    const originalAnswer = ctx.answerCallbackQuery.bind(ctx);
+    ctx.answerCallbackQuery = async (...args) => {
+      callOrder.push("answerCallbackQuery");
+      await originalAnswer(...args);
+    };
+
+    await createDocumentCallbackHandler(provider)(ctx, "x.md");
+
+    expect(callOrder).toEqual(["answerCallbackQuery", "getDocument"]);
+  });
+
+  it("shows a friendly message (via the document keyboard) when the document is missing, without leaking the raw error", async () => {
     const provider = createFakeContentProvider({
       getDocument: async (path) => {
         throw new ContentNotFoundError(path);
@@ -105,14 +125,19 @@ describe("createDocumentCallbackHandler", () => {
 
     await createDocumentCallbackHandler(provider)(ctx, "missing.md");
 
-    expect(updateMessageCalls).toHaveLength(0);
-    expect(sendMessageCalls).toHaveLength(0);
     expect(answerCallbackQueryCalls).toEqual([
-      { text: "📄 Not found.", showAlert: true },
+      { text: undefined, showAlert: undefined },
+    ]);
+    expect(sendMessageCalls).toHaveLength(0);
+    expect(updateMessageCalls).toHaveLength(1);
+    expect(updateMessageCalls[0].text).toBe("📄 Not found.");
+    expect(updateMessageCalls[0].keyboard?.inline_keyboard[0]).toEqual([
+      { text: "⬅️ Back", callback_data: "d:" },
+      { text: "🏠 Home", callback_data: "d:" },
     ]);
   });
 
-  it("shows a generic alert (never the raw error) when the provider fails", async () => {
+  it("shows a generic message (never the raw error) when the provider fails", async () => {
     const provider = createFakeContentProvider({
       getDocument: async () => {
         throw new ContentProviderUnavailableError(
@@ -120,11 +145,11 @@ describe("createDocumentCallbackHandler", () => {
         );
       },
     });
-    const { ctx, answerCallbackQueryCalls } = createFakeBotContext();
+    const { ctx, updateMessageCalls } = createFakeBotContext();
 
     await createDocumentCallbackHandler(provider)(ctx, "x.md");
 
-    expect(answerCallbackQueryCalls[0].showAlert).toBe(true);
-    expect(answerCallbackQueryCalls[0].text).not.toContain("GitHub is down");
+    expect(updateMessageCalls).toHaveLength(1);
+    expect(updateMessageCalls[0].text).not.toContain("GitHub is down");
   });
 });

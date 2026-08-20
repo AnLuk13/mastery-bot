@@ -6,16 +6,22 @@ import { describeContentError } from "../userMessages";
 
 export function createDocumentCallbackHandler(provider: ContentProvider) {
   return async (ctx: BotContext, canonicalPath: string): Promise<void> => {
+    // Acknowledge before doing any slow work (GitHub fetch, message send/edit): Telegram
+    // expires a callback query after a short window, and answering late causes it to
+    // retry-deliver the update, compounding the delay.
+    await ctx.answerCallbackQuery();
+
+    const keyboard = buildDocumentKeyboard(canonicalPath);
+
     let document: Document;
     try {
       document = await provider.getDocument(canonicalPath);
     } catch (error) {
-      await ctx.answerCallbackQuery(describeContentError(error), true);
+      await ctx.updateMessage(describeContentError(error), keyboard);
       return;
     }
 
     const messages = renderDocumentMessages(document);
-    const keyboard = buildDocumentKeyboard(canonicalPath);
     const lastIndex = messages.length - 1;
 
     for (let i = 0; i < messages.length; i++) {
@@ -27,7 +33,5 @@ export function createDocumentCallbackHandler(provider: ContentProvider) {
         await ctx.sendMessage(text, isLast ? keyboard : undefined, parseMode);
       }
     }
-
-    await ctx.answerCallbackQuery();
   };
 }
