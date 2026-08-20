@@ -19,7 +19,7 @@ describe("renderDirectory", () => {
     const { ctx, updateMessageCalls, answerCallbackQueryCalls } =
       createFakeBotContext();
 
-    await renderDirectory(ctx, provider, "");
+    await renderDirectory(ctx, provider, "", []);
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].text).toBe("📚 Mastery");
@@ -36,7 +36,7 @@ describe("renderDirectory", () => {
     });
     const { ctx, updateMessageCalls } = createFakeBotContext();
 
-    await renderDirectory(ctx, provider, "networking-mastery/protocols");
+    await renderDirectory(ctx, provider, "networking-mastery/protocols", []);
 
     expect(updateMessageCalls[0].text).toBe("📁 protocols");
   });
@@ -51,7 +51,7 @@ describe("renderDirectory", () => {
     });
     const { ctx } = createFakeBotContext();
 
-    await renderDirectory(ctx, provider, "networking-mastery");
+    await renderDirectory(ctx, provider, "networking-mastery", []);
 
     expect(requestedPath).toBe("networking-mastery");
   });
@@ -65,7 +65,7 @@ describe("renderDirectory", () => {
     const { ctx, updateMessageCalls, answerCallbackQueryCalls } =
       createFakeBotContext();
 
-    await renderDirectory(ctx, provider, "networking-mastery");
+    await renderDirectory(ctx, provider, "networking-mastery", []);
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].text).not.toContain("boom");
@@ -91,7 +91,7 @@ describe("renderDirectory", () => {
       await originalAnswer(...args);
     };
 
-    await renderDirectory(ctx, provider, "networking-mastery");
+    await renderDirectory(ctx, provider, "networking-mastery", []);
 
     expect(callOrder).toEqual(["answerCallbackQuery", "listDirectory"]);
   });
@@ -103,7 +103,7 @@ describe("renderDirectory", () => {
     const { ctx, deleteMessagesCalls, updateMessageCalls } =
       createFakeBotContext();
 
-    await renderDirectory(ctx, provider, "networking-mastery", {
+    await renderDirectory(ctx, provider, "networking-mastery", [], {
       firstMessageId: 100,
       count: 3,
     });
@@ -118,9 +118,47 @@ describe("renderDirectory", () => {
     });
     const { ctx, deleteMessagesCalls } = createFakeBotContext();
 
-    await renderDirectory(ctx, provider, "networking-mastery");
+    await renderDirectory(ctx, provider, "networking-mastery", []);
 
     expect(deleteMessagesCalls).toHaveLength(0);
+  });
+
+  it("shows the same 'not found' message (never a distinct 'forbidden') for a path private to another user", async () => {
+    let called = false;
+    const provider = createFakeContentProvider({
+      listDirectory: async () => {
+        called = true;
+        return entries;
+      },
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext({ userId: 999 });
+
+    await renderDirectory(ctx, provider, "ai-mastery", [
+      { folder: "ai-mastery", ownerId: 712059530 },
+    ]);
+
+    expect(called).toBe(false);
+    expect(updateMessageCalls[0].text).toBe("📄 Not found.");
+  });
+
+  it("filters entries in a folder private to another user out of a listing", async () => {
+    const mixedEntries: ContentEntry[] = [
+      { type: "directory", name: "ai-mastery", path: "ai-mastery" },
+      { type: "directory", name: "andreea", path: "andreea" },
+    ];
+    const provider = createFakeContentProvider({
+      listDirectory: async () => mixedEntries,
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext({ userId: 999 });
+
+    await renderDirectory(ctx, provider, "", [
+      { folder: "ai-mastery", ownerId: 712059530 },
+    ]);
+
+    const buttons = (
+      updateMessageCalls[0].keyboard?.inline_keyboard ?? []
+    ).flat();
+    expect(buttons.map((b) => b.text)).toEqual(["📁 andreea", "🔎 Search"]);
   });
 });
 
@@ -133,7 +171,10 @@ describe("createDirectoryCallbackHandler", () => {
       callbackData: "d:networking-mastery",
     });
 
-    await createDirectoryCallbackHandler(provider)(ctx, "networking-mastery");
+    await createDirectoryCallbackHandler(provider, [])(
+      ctx,
+      "networking-mastery",
+    );
 
     expect(updateMessageCalls[0].text).toBe("📁 networking-mastery");
   });
@@ -144,10 +185,14 @@ describe("createDirectoryCallbackHandler", () => {
     });
     const { ctx, deleteMessagesCalls } = createFakeBotContext();
 
-    await createDirectoryCallbackHandler(provider)(ctx, "networking-mastery", {
-      firstMessageId: 7,
-      count: 1,
-    });
+    await createDirectoryCallbackHandler(provider, [])(
+      ctx,
+      "networking-mastery",
+      {
+        firstMessageId: 7,
+        count: 1,
+      },
+    );
 
     expect(deleteMessagesCalls).toEqual([{ fromMessageId: 7, count: 1 }]);
   });

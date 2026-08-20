@@ -1,3 +1,4 @@
+import { isPathVisible, type PrivateFolderConfig } from "@/content";
 import type { EmbeddingsIndex } from "./types";
 import type { ChatMessage, GroqClient, RateLimitInfo } from "./groqClient";
 import { retrieveTopK } from "./retrieve";
@@ -17,6 +18,7 @@ export interface AnswerQuestionDeps {
   // Pick<>, not the concrete class: GroqClient's private fields would otherwise
   // make it nominally typed, forcing every test fake to be a real instance.
   groq: Pick<GroqClient, "createChatCompletion">;
+  privateFolders: readonly PrivateFolderConfig[];
 }
 
 export interface Answer {
@@ -47,10 +49,13 @@ function buildContextBlock(
 
 export async function answerQuestion(
   question: string,
+  userId: number | undefined,
   deps: AnswerQuestionDeps,
 ): Promise<Answer> {
   const queryVector = await deps.embed(question);
-  const retrieved = retrieveTopK(queryVector, deps.index, TOP_K);
+  const retrieved = retrieveTopK(queryVector, deps.index, TOP_K).filter(
+    (chunk) => isPathVisible(chunk.path, userId, deps.privateFolders),
+  );
 
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },

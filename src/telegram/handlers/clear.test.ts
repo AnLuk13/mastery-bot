@@ -15,7 +15,7 @@ describe("createClearHandler", () => {
       listDirectory: async () => [],
     });
 
-    await createClearHandler(provider)(ctx);
+    await createClearHandler(provider, [])(ctx);
 
     expect(deleteMessagesCalls).toHaveLength(1);
     expect(deleteMessagesCalls[0]).toEqual({ fromMessageId: 5041, count: 60 });
@@ -28,7 +28,7 @@ describe("createClearHandler", () => {
     });
     const provider = createFakeContentProvider();
 
-    await createClearHandler(provider)(ctx);
+    await createClearHandler(provider, [])(ctx);
 
     expect(deleteMessagesCalls[0]).toEqual({ fromMessageId: 1, count: 10 });
   });
@@ -38,7 +38,7 @@ describe("createClearHandler", () => {
       createFakeBotContext();
     const provider = createFakeContentProvider();
 
-    await createClearHandler(provider)(ctx);
+    await createClearHandler(provider, [])(ctx);
 
     expect(deleteMessagesCalls).toHaveLength(0);
     expect(updateMessageCalls).toHaveLength(1);

@@ -12,6 +12,7 @@ const fakeAskDeps: AnswerQuestionDeps = {
   embed: async () => [],
   index: { model: "test-model", dimensions: 0, chunks: [] },
   groq: new GroqClient({ apiKey: "test-key", model: "test-model" }),
+  privateFolders: [],
 };
 
 /**
@@ -50,6 +51,7 @@ describe("createBot", () => {
       askDeps: fakeAskDeps,
       editors: [],
       contentWriter: createFakeContentWriter().writer,
+      privateFolders: [],
       botInfo: fakeBotInfo,
     });
 

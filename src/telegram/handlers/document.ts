@@ -1,11 +1,20 @@
-import type { ContentProvider, Document } from "@/content";
+import {
+  ContentNotFoundError,
+  isPathVisible,
+  type ContentProvider,
+  type Document,
+  type PrivateFolderConfig,
+} from "@/content";
 import type { CleanupHint } from "../callbackData";
 import { buildDocumentKeyboard } from "../keyboards/navigation";
 import { renderDocumentMessages } from "../formatting";
 import type { BotContext } from "../types";
 import { describeContentError } from "../userMessages";
 
-export function createDocumentCallbackHandler(provider: ContentProvider) {
+export function createDocumentCallbackHandler(
+  provider: ContentProvider,
+  privateFolders: readonly PrivateFolderConfig[],
+) {
   return async (ctx: BotContext, canonicalPath: string): Promise<void> => {
     // Acknowledge before doing any slow work (GitHub fetch, message send/edit): Telegram
     // expires a callback query after a short window, and answering late causes it to
@@ -14,6 +23,11 @@ export function createDocumentCallbackHandler(provider: ContentProvider) {
 
     let document: Document;
     try {
+      // Same "not found" a genuinely missing path gets — never reveal that a
+      // private path exists to someone who isn't its owner.
+      if (!isPathVisible(canonicalPath, ctx.userId, privateFolders)) {
+        throw new ContentNotFoundError(canonicalPath);
+      }
       document = await provider.getDocument(canonicalPath);
     } catch (error) {
       await ctx.updateMessage(

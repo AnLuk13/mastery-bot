@@ -30,6 +30,7 @@ function makeDeps(
         rateLimit: undefined,
       }),
     },
+    privateFolders: overrides.privateFolders ?? [],
   };
 }
 

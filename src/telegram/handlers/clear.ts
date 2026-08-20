@@ -1,4 +1,4 @@
-import type { ContentProvider } from "@/content";
+import type { ContentProvider, PrivateFolderConfig } from "@/content";
 import type { BotContext } from "../types";
 import { renderDirectory } from "./navigation";
 
@@ -13,7 +13,10 @@ import { renderDirectory } from "./navigation";
 const CLEAR_LOOKBACK_MESSAGES = 60;
 
 /** Deletes recent chat clutter (your typed questions and the bot's replies) and shows just the menu. */
-export function createClearHandler(provider: ContentProvider) {
+export function createClearHandler(
+  provider: ContentProvider,
+  privateFolders: readonly PrivateFolderConfig[],
+) {
   return async (ctx: BotContext): Promise<void> => {
     if (ctx.messageId !== undefined) {
       const fromMessageId = Math.max(
@@ -25,6 +28,6 @@ export function createClearHandler(provider: ContentProvider) {
         ctx.messageId - fromMessageId + 1,
       );
     }
-    await renderDirectory(ctx, provider, "");
+    await renderDirectory(ctx, provider, "", privateFolders);
   };
 }

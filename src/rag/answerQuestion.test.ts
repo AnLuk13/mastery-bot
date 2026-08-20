@@ -37,6 +37,7 @@ function makeDeps(
         return { text: "a generated answer", rateLimit: undefined };
       },
     },
+    privateFolders: overrides.privateFolders ?? [],
     capturedMessages,
   };
 }
@@ -44,7 +45,11 @@ function makeDeps(
 describe("answerQuestion", () => {
   it("cites sources whose retrieved chunk clears the relevance threshold", async () => {
     const deps = makeDeps();
-    const result = await answerQuestion("what are embeddings?", deps);
+    const result = await answerQuestion(
+      "what are embeddings?",
+      undefined,
+      deps,
+    );
 
     expect(result.text).toBe("a generated answer");
     expect(result.sources).toEqual(["ai-mastery/05-embeddings.md"]);
@@ -62,13 +67,13 @@ describe("answerQuestion", () => {
         createChatCompletion: async () => ({ text: "answer", rateLimit }),
       },
     });
-    const result = await answerQuestion("q", deps);
+    const result = await answerQuestion("q", undefined, deps);
     expect(result.rateLimit).toEqual(rateLimit);
   });
 
   it("omits sources whose retrieved chunk falls below the relevance threshold", async () => {
     const deps = makeDeps({ embed: async () => [0.1, 0.1] });
-    const result = await answerQuestion("something unrelated", deps);
+    const result = await answerQuestion("something unrelated", undefined, deps);
     expect(result.sources).toEqual([]);
   });
 
@@ -83,13 +88,40 @@ describe("answerQuestion", () => {
         ],
       },
     });
-    const result = await answerQuestion("q", deps);
+    const result = await answerQuestion("q", undefined, deps);
     expect(result.sources).toEqual(["a.md"]);
+  });
+
+  it("excludes chunks from a folder private to another user, both from context and citations", async () => {
+    const deps = makeDeps({
+      privateFolders: [{ folder: "ai-mastery", ownerId: 712059530 }],
+    });
+    const result = await answerQuestion("what are embeddings?", 999, deps);
+
+    expect(result.sources).toEqual([]);
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).not.toContain("ai-mastery/05-embeddings.md");
+    expect(userMessage.content).not.toContain(
+      "Embeddings map text to vectors.",
+    );
+  });
+
+  it("still includes a private chunk when the asker is its owner", async () => {
+    const deps = makeDeps({
+      privateFolders: [{ folder: "ai-mastery", ownerId: 712059530 }],
+    });
+    const result = await answerQuestion(
+      "what are embeddings?",
+      712059530,
+      deps,
+    );
+
+    expect(result.sources).toEqual(["ai-mastery/05-embeddings.md"]);
   });
 
   it("passes the retrieved context and the question to the model", async () => {
     const deps = makeDeps();
-    await answerQuestion("what are embeddings?", deps);
+    await answerQuestion("what are embeddings?", undefined, deps);
 
     const [systemMessage, userMessage] = deps.capturedMessages[0];
     expect(systemMessage.role).toBe("system");

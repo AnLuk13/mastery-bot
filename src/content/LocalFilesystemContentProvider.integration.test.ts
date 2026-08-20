@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { LocalFilesystemContentProvider } from "./LocalFilesystemContentProvider";
+import type { ContentEntry } from "./types";
 
 /**
  * Sanity check against the real mastery knowledge base, if present on this
@@ -18,6 +19,21 @@ describe.skipIf(!rootExists)(
   () => {
     const provider = new LocalFilesystemContentProvider(REAL_CONTENT_ROOT);
 
+    /** Depth-first search for the first document anywhere under `dirPath` — makes no assumption about nesting depth. */
+    async function findFirstDocument(
+      dirPath: string,
+    ): Promise<ContentEntry | undefined> {
+      const entries = await provider.listDirectory(dirPath);
+      const document = entries.find((entry) => entry.type === "document");
+      if (document) return document;
+      for (const entry of entries) {
+        if (entry.type !== "directory") continue;
+        const found = await findFirstDocument(entry.path);
+        if (found) return found;
+      }
+      return undefined;
+    }
+
     it("lists the real content root", async () => {
       const entries = await provider.listDirectory("");
       expect(entries.length).toBeGreaterThan(0);
@@ -26,23 +42,13 @@ describe.skipIf(!rootExists)(
       }
     });
 
-    it("navigates into a discovered top-level folder and finds documents", async () => {
-      const root = await provider.listDirectory("");
-      const folder = root.find((entry) => entry.type === "directory");
-      expect(folder).toBeDefined();
-      if (!folder) return;
-
-      const children = await provider.listDirectory(folder.path);
-      expect(children.some((entry) => entry.type === "document")).toBe(true);
+    it("navigates into a discovered folder and finds documents somewhere within it", async () => {
+      const document = await findFirstDocument("");
+      expect(document).toBeDefined();
     });
 
     it("reads a discovered document end-to-end", async () => {
-      const root = await provider.listDirectory("");
-      const folder = root.find((entry) => entry.type === "directory");
-      if (!folder) return;
-
-      const children = await provider.listDirectory(folder.path);
-      const document = children.find((entry) => entry.type === "document");
+      const document = await findFirstDocument("");
       expect(document).toBeDefined();
       if (!document) return;
 

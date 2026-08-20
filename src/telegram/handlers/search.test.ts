@@ -18,7 +18,7 @@ describe("createSearchCommandHandler", () => {
     });
     const { ctx, sendMessageCalls } = createFakeBotContext({ commandArgs: "" });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(called).toBe(false);
     expect(sendMessageCalls).toHaveLength(1);
@@ -35,7 +35,7 @@ describe("createSearchCommandHandler", () => {
     });
     const { ctx } = createFakeBotContext({ commandArgs: "   " });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(called).toBe(false);
   });
@@ -50,7 +50,7 @@ describe("createSearchCommandHandler", () => {
     });
     const { ctx } = createFakeBotContext({ commandArgs: "  TCP Handshake  " });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(receivedQuery).toBe("TCP Handshake");
   });
@@ -61,7 +61,7 @@ describe("createSearchCommandHandler", () => {
       commandArgs: "zzz-nonexistent",
     });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].text).toContain("No results found");
@@ -77,7 +77,7 @@ describe("createSearchCommandHandler", () => {
       commandArgs: "index",
     });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(sendMessageCalls[0].keyboard?.inline_keyboard[0][0]).toEqual({
       text: "📄 00-index.md",
@@ -94,7 +94,7 @@ describe("createSearchCommandHandler", () => {
       commandArgs: "networking-mastery",
     });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(sendMessageCalls[0].keyboard?.inline_keyboard[0][0]).toMatchObject({
       callback_data: "f:networking-mastery/tcp.md",
@@ -120,7 +120,7 @@ describe("createSearchCommandHandler", () => {
       commandArgs: "tcp",
     });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     const rows = sendMessageCalls[0].keyboard?.inline_keyboard ?? [];
     expect(rows).toHaveLength(2);
@@ -145,10 +145,40 @@ describe("createSearchCommandHandler", () => {
       commandArgs: "tcp",
     });
 
-    await createSearchCommandHandler(provider)(ctx);
+    await createSearchCommandHandler(provider, [])(ctx);
 
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].text).not.toContain("rate-limit");
+  });
+
+  it("filters out results in a folder private to another user", async () => {
+    const results: SearchResult[] = [
+      {
+        path: "ai-mastery/01-intro.md",
+        name: "01-intro.md",
+        matchType: "filename",
+      },
+      {
+        path: "networking-mastery/01-tcp.md",
+        name: "01-tcp.md",
+        matchType: "filename",
+      },
+    ];
+    const provider = createFakeContentProvider({ search: async () => results });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 999,
+      commandArgs: "tcp",
+    });
+
+    await createSearchCommandHandler(provider, [
+      { folder: "ai-mastery", ownerId: 712059530 },
+    ])(ctx);
+
+    const rows = sendMessageCalls[0].keyboard?.inline_keyboard ?? [];
+    expect(rows).toHaveLength(1);
+    expect(rows[0][0]).toMatchObject({
+      callback_data: "f:networking-mastery/01-tcp.md",
+    });
   });
 
   it("never reaches the provider for an unauthorized user (gated by the shared auth check)", async () => {
@@ -165,7 +195,7 @@ describe("createSearchCommandHandler", () => {
     });
 
     const authorized = await enforceAuthorization(ctx, [123]);
-    if (authorized) await createSearchCommandHandler(provider)(ctx);
+    if (authorized) await createSearchCommandHandler(provider, [])(ctx);
 
     expect(authorized).toBe(false);
     expect(called).toBe(false);

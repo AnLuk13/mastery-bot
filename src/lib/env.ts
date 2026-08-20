@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { normalizeRelativePath } from "@/content";
+import { normalizeRelativePath, type PrivateFolderConfig } from "@/content";
 
 const csvUserIds = z
   .string()
@@ -59,6 +59,46 @@ const editorsSchema = z
   )
   .pipe(z.array(editorEntry));
 
+const privateFolderEntry = z
+  .string()
+  .regex(
+    /^.+:\d+$/,
+    "each entry must be formatted as <folder-name>:<telegram-user-id>",
+  )
+  .transform((entry, ctx): PrivateFolderConfig => {
+    const separatorIndex = entry.lastIndexOf(":");
+    const folderRaw = entry.slice(0, separatorIndex);
+    const ownerId = Number(entry.slice(separatorIndex + 1));
+
+    try {
+      const normalized = normalizeRelativePath(folderRaw);
+      if (normalized === "" || normalized.includes("/")) {
+        throw new Error("must be a single top-level folder name");
+      }
+      return { folder: normalized, ownerId };
+    } catch (error) {
+      ctx.addIssue({
+        code: "custom",
+        message: `invalid folder in "${entry}": ${error instanceof Error ? error.message : "invalid"}`,
+      });
+      return z.NEVER;
+    }
+  });
+
+// Comma-separated <folder-name>:<telegram-user-id> pairs — a top-level folder
+// visible only to its owner. Independent of EDITORS: a folder can be private
+// without being anyone's /save target (e.g. legacy content), or vice versa.
+const privateFoldersSchema = z
+  .string()
+  .optional()
+  .transform((value) =>
+    (value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part !== ""),
+  )
+  .pipe(z.array(privateFolderEntry));
+
 const baseSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1, "is required"),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(1, "is required"),
@@ -76,6 +116,7 @@ const baseSchema = z.object({
   GROQ_API_KEY: z.string().min(1, "is required"),
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
   EDITORS: editorsSchema,
+  PRIVATE_FOLDERS: privateFoldersSchema,
 });
 
 const envSchema = baseSchema.superRefine((value, ctx) => {

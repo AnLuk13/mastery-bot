@@ -1,5 +1,5 @@
 import { Bot, type BotConfig, type Context } from "grammy";
-import type { ContentProvider } from "@/content";
+import type { ContentProvider, PrivateFolderConfig } from "@/content";
 import type { EditorConfig } from "@/lib/env";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import { adaptContext } from "./adapter";
@@ -34,6 +34,7 @@ export interface CreateBotOptions {
   askDeps: AnswerQuestionDeps;
   editors: readonly EditorConfig[];
   contentWriter: ContentWriterLike;
+  privateFolders: readonly PrivateFolderConfig[];
   /** Pass to skip grammY's getMe network call, e.g. in tests. */
   botInfo?: BotConfig<Context>["botInfo"];
 }
@@ -48,7 +49,7 @@ export function createBot(options: CreateBotOptions): Bot {
     options.token,
     options.botInfo ? { botInfo: options.botInfo } : undefined,
   );
-  const { contentProvider, allowedUserIds } = options;
+  const { contentProvider, allowedUserIds, privateFolders } = options;
 
   bot.use(async (grammyCtx, next) => {
     const ctx = adaptContext(grammyCtx);
@@ -57,15 +58,24 @@ export function createBot(options: CreateBotOptions): Bot {
   });
 
   bot.command("start", async (grammyCtx) => {
-    await createStartHandler(contentProvider)(adaptContext(grammyCtx));
+    await createStartHandler(
+      contentProvider,
+      privateFolders,
+    )(adaptContext(grammyCtx));
   });
 
   bot.command("search", async (grammyCtx) => {
-    await createSearchCommandHandler(contentProvider)(adaptContext(grammyCtx));
+    await createSearchCommandHandler(
+      contentProvider,
+      privateFolders,
+    )(adaptContext(grammyCtx));
   });
 
   bot.command("clear", async (grammyCtx) => {
-    await createClearHandler(contentProvider)(adaptContext(grammyCtx));
+    await createClearHandler(
+      contentProvider,
+      privateFolders,
+    )(adaptContext(grammyCtx));
   });
 
   const saveHandler = createSaveHandler({
@@ -120,11 +130,15 @@ export function createBot(options: CreateBotOptions): Bot {
           ctx,
           contentProvider,
           decoded.path,
+          privateFolders,
           decoded.cleanup,
         );
         break;
       case "document":
-        await createDocumentCallbackHandler(contentProvider)(ctx, decoded.path);
+        await createDocumentCallbackHandler(contentProvider, privateFolders)(
+          ctx,
+          decoded.path,
+        );
         break;
       case "search-help":
         await handleSearchHelpCallback(ctx);

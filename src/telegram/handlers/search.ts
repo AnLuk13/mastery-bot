@@ -1,4 +1,8 @@
-import type { ContentProvider } from "@/content";
+import {
+  isPathVisible,
+  type ContentProvider,
+  type PrivateFolderConfig,
+} from "@/content";
 import { buildSearchResultsKeyboard } from "../keyboards/search";
 import type { BotContext } from "../types";
 import {
@@ -8,7 +12,10 @@ import {
   SEARCH_USAGE_MESSAGE,
 } from "../userMessages";
 
-export function createSearchCommandHandler(provider: ContentProvider) {
+export function createSearchCommandHandler(
+  provider: ContentProvider,
+  privateFolders: readonly PrivateFolderConfig[],
+) {
   return async (ctx: BotContext): Promise<void> => {
     const query = (ctx.commandArgs ?? "").trim();
     if (query === "") {
@@ -17,7 +24,9 @@ export function createSearchCommandHandler(provider: ContentProvider) {
     }
 
     try {
-      const results = await provider.search(query);
+      const results = (await provider.search(query)).filter((result) =>
+        isPathVisible(result.path, ctx.userId, privateFolders),
+      );
       if (results.length === 0) {
         await ctx.sendMessage(formatNoSearchResults(query));
         return;

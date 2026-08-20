@@ -12,7 +12,7 @@ export function createAskHandler(deps: AnswerQuestionDeps) {
     await ctx.sendTyping();
 
     try {
-      const answer = await answerQuestion(question, deps);
+      const answer = await answerQuestion(question, ctx.userId, deps);
       // The model's Markdown answer goes through the same Markdown->Telegram-HTML
       // pipeline used for documents, so bold/bullets/etc. render properly instead
       // of showing up as literal asterisks — and long answers split safely too.

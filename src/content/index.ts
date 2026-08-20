@@ -26,6 +26,8 @@ export {
 } from "./paths";
 export { buildSnippet } from "./snippet";
 export { compareContentEntries, naturalCompare } from "./sort";
+export { isPathVisible } from "./visibility";
+export type { PrivateFolderConfig } from "./visibility";
 export type {
   ContentEntry,
   ContentProvider,

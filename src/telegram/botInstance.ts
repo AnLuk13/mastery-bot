@@ -40,8 +40,10 @@ function getBot(): Bot {
           apiKey: env.GROQ_API_KEY,
           model: env.GROQ_MODEL,
         }),
+        privateFolders: env.PRIVATE_FOLDERS,
       },
       editors: env.EDITORS,
+      privateFolders: env.PRIVATE_FOLDERS,
       // /save always writes to GitHub directly regardless of CONTENT_PROVIDER
       // (env.ts requires GITHUB_OWNER/GITHUB_REPOSITORY/GITHUB_TOKEN whenever
       // EDITORS is non-empty, so these are guaranteed present here).

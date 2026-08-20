@@ -1,5 +1,10 @@
 import { InlineKeyboard } from "grammy";
-import type { ContentProvider } from "@/content";
+import {
+  ContentNotFoundError,
+  isPathVisible,
+  type ContentProvider,
+  type PrivateFolderConfig,
+} from "@/content";
 import { encodeNavigateCallbackData, type CleanupHint } from "../callbackData";
 import { buildDirectoryKeyboard } from "../keyboards/navigation";
 import type { BotContext } from "../types";
@@ -20,6 +25,7 @@ export async function renderDirectory(
   ctx: BotContext,
   provider: ContentProvider,
   canonicalPath: string,
+  privateFolders: readonly PrivateFolderConfig[],
   cleanup?: CleanupHint,
 ): Promise<void> {
   // Acknowledge before doing any slow work (GitHub fetch, message edit): Telegram
@@ -32,7 +38,14 @@ export async function renderDirectory(
   }
 
   try {
-    const entries = await provider.listDirectory(canonicalPath);
+    // Same "not found", not a distinct "forbidden" message, for a path someone
+    // isn't allowed to see — never reveal that a private path even exists.
+    if (!isPathVisible(canonicalPath, ctx.userId, privateFolders)) {
+      throw new ContentNotFoundError(canonicalPath);
+    }
+    const entries = (await provider.listDirectory(canonicalPath)).filter(
+      (entry) => isPathVisible(entry.path, ctx.userId, privateFolders),
+    );
     const keyboard = buildDirectoryKeyboard(entries, canonicalPath);
     await ctx.updateMessage(directoryTitle(canonicalPath), keyboard);
   } catch (error) {
@@ -40,12 +53,21 @@ export async function renderDirectory(
   }
 }
 
-export function createDirectoryCallbackHandler(provider: ContentProvider) {
+export function createDirectoryCallbackHandler(
+  provider: ContentProvider,
+  privateFolders: readonly PrivateFolderConfig[],
+) {
   return async (
     ctx: BotContext,
     canonicalPath: string,
     cleanup?: CleanupHint,
   ): Promise<void> => {
-    await renderDirectory(ctx, provider, canonicalPath, cleanup);
+    await renderDirectory(
+      ctx,
+      provider,
+      canonicalPath,
+      privateFolders,
+      cleanup,
+    );
   };
 }

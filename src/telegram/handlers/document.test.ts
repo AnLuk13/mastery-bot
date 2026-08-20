@@ -33,7 +33,7 @@ describe("createDocumentCallbackHandler", () => {
       callbackData: "f:networking-mastery/01-tcp.md",
     });
 
-    await createDocumentCallbackHandler(provider)(
+    await createDocumentCallbackHandler(provider, [])(
       ctx,
       "networking-mastery/01-tcp.md",
     );
@@ -61,7 +61,7 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx } = createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider)(
+    await createDocumentCallbackHandler(provider, [])(
       ctx,
       "networking-mastery/01-tcp.md",
     );
@@ -77,7 +77,7 @@ describe("createDocumentCallbackHandler", () => {
     const { ctx, updateMessageCalls, sendMessageCalls } =
       createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider)(ctx, "big.md");
+    await createDocumentCallbackHandler(provider, [])(ctx, "big.md");
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].keyboard).toBeUndefined();
@@ -97,7 +97,7 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, sendMessageCalls } = createFakeBotContext({ messageId: 500 });
 
-    await createDocumentCallbackHandler(provider)(ctx, "big.md");
+    await createDocumentCallbackHandler(provider, [])(ctx, "big.md");
 
     const lastKeyboard = sendMessageCalls.at(-1)?.keyboard;
     const backButton = lastKeyboard?.inline_keyboard[0][0];
@@ -115,7 +115,7 @@ describe("createDocumentCallbackHandler", () => {
       messageId: 500,
     });
 
-    await createDocumentCallbackHandler(provider)(
+    await createDocumentCallbackHandler(provider, [])(
       ctx,
       "networking-mastery/01-tcp.md",
     );
@@ -134,7 +134,7 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, sendMessageCalls } = createFakeBotContext(); // no messageId
 
-    await createDocumentCallbackHandler(provider)(ctx, "big.md");
+    await createDocumentCallbackHandler(provider, [])(ctx, "big.md");
 
     const backButton = sendMessageCalls.at(-1)?.keyboard?.inline_keyboard[0][0];
     expect(backButton).toMatchObject({
@@ -157,7 +157,7 @@ describe("createDocumentCallbackHandler", () => {
       await originalAnswer(...args);
     };
 
-    await createDocumentCallbackHandler(provider)(ctx, "x.md");
+    await createDocumentCallbackHandler(provider, [])(ctx, "x.md");
 
     expect(callOrder).toEqual(["answerCallbackQuery", "getDocument"]);
   });
@@ -175,7 +175,7 @@ describe("createDocumentCallbackHandler", () => {
       answerCallbackQueryCalls,
     } = createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider)(ctx, "missing.md");
+    await createDocumentCallbackHandler(provider, [])(ctx, "missing.md");
 
     expect(answerCallbackQueryCalls).toEqual([
       { text: undefined, showAlert: undefined },
@@ -199,9 +199,42 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, updateMessageCalls } = createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider)(ctx, "x.md");
+    await createDocumentCallbackHandler(provider, [])(ctx, "x.md");
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].text).not.toContain("GitHub is down");
+  });
+
+  it("shows the same 'not found' message (never a distinct 'forbidden') for a path private to another user, without calling the provider", async () => {
+    let called = false;
+    const provider = createFakeContentProvider({
+      getDocument: async () => {
+        called = true;
+        return makeDocument({ path: "ai-mastery/01-intro.md" });
+      },
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext({ userId: 999 });
+
+    await createDocumentCallbackHandler(provider, [
+      { folder: "ai-mastery", ownerId: 712059530 },
+    ])(ctx, "ai-mastery/01-intro.md");
+
+    expect(called).toBe(false);
+    expect(updateMessageCalls[0].text).toBe("📄 Not found.");
+  });
+
+  it("allows the owner to view their own private path", async () => {
+    const provider = createFakeContentProvider({
+      getDocument: async () => makeDocument({ path: "ai-mastery/01-intro.md" }),
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+    });
+
+    await createDocumentCallbackHandler(provider, [
+      { folder: "ai-mastery", ownerId: 712059530 },
+    ])(ctx, "ai-mastery/01-intro.md");
+
+    expect(updateMessageCalls[0].text).not.toBe("📄 Not found.");
   });
 });
