@@ -90,6 +90,58 @@ describe("createDocumentCallbackHandler", () => {
     expect(sendMessageCalls.at(-1)?.keyboard).toBeDefined();
   });
 
+  it("attaches a cleanup hint (starting at the current message) to the last message's Back/Home when the document overflowed", async () => {
+    const longContent = "word ".repeat(2000);
+    const provider = createFakeContentProvider({
+      getDocument: async () => makeDocument({ content: longContent }),
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({ messageId: 500 });
+
+    await createDocumentCallbackHandler(provider)(ctx, "big.md");
+
+    const lastKeyboard = sendMessageCalls.at(-1)?.keyboard;
+    const backButton = lastKeyboard?.inline_keyboard[0][0];
+    // 3 messages total (1 edited + 2 sent) means 2 extra messages to clean up, starting at the edited message's id.
+    expect(backButton).toMatchObject({
+      callback_data: expect.stringContaining("%500+2"),
+    });
+  });
+
+  it("attaches no cleanup hint when the document fits in a single message, even with a known messageId", async () => {
+    const provider = createFakeContentProvider({
+      getDocument: async () => makeDocument(),
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext({
+      messageId: 500,
+    });
+
+    await createDocumentCallbackHandler(provider)(
+      ctx,
+      "networking-mastery/01-tcp.md",
+    );
+
+    const backButton = updateMessageCalls[0].keyboard?.inline_keyboard[0][0];
+    expect(backButton).toEqual({
+      text: "⬅️ Back",
+      callback_data: "d:networking-mastery",
+    });
+  });
+
+  it("attaches no cleanup hint when messageId is unknown, even for an overflowing document", async () => {
+    const longContent = "word ".repeat(2000);
+    const provider = createFakeContentProvider({
+      getDocument: async () => makeDocument({ content: longContent }),
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext(); // no messageId
+
+    await createDocumentCallbackHandler(provider)(ctx, "big.md");
+
+    const backButton = sendMessageCalls.at(-1)?.keyboard?.inline_keyboard[0][0];
+    expect(backButton).toMatchObject({
+      callback_data: expect.not.stringContaining("%"),
+    });
+  });
+
   it("acknowledges the callback immediately, before any slow work, regardless of outcome", async () => {
     const callOrder: string[] = [];
     const provider = createFakeContentProvider({

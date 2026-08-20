@@ -16,6 +16,7 @@ export function adaptContext(ctx: Context): BotContext {
     userId: ctx.from?.id,
     callbackData: ctx.callbackQuery?.data,
     commandArgs: typeof ctx.match === "string" ? ctx.match : undefined,
+    messageId: ctx.callbackQuery?.message?.message_id,
 
     async sendMessage(text, keyboard, parseMode) {
       await ctx.reply(text, replyOptions(keyboard, parseMode));
@@ -38,6 +39,25 @@ export function adaptContext(ctx: Context): BotContext {
       if (!ctx.callbackQuery) return;
       await ctx.answerCallbackQuery(
         text ? { text, show_alert: showAlert ?? false } : undefined,
+      );
+    },
+
+    async deleteMessages(fromMessageId, count) {
+      const chatId = ctx.chat?.id;
+      if (chatId === undefined) return;
+
+      await Promise.all(
+        Array.from(
+          { length: count },
+          (_, offset) => fromMessageId + offset,
+        ).map(async (messageId) => {
+          try {
+            await ctx.api.deleteMessage(chatId, messageId);
+          } catch {
+            // Best-effort: already deleted, too old, or the consecutive-ID
+            // assumption didn't hold for this one — never block navigation on it.
+          }
+        }),
       );
     },
   };

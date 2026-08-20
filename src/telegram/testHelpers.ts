@@ -14,11 +14,17 @@ export interface RecordedAnswer {
   showAlert?: boolean;
 }
 
+export interface RecordedDeleteMessages {
+  fromMessageId: number;
+  count: number;
+}
+
 export interface FakeBotContext {
   ctx: BotContext;
   sendMessageCalls: RecordedCall[];
   updateMessageCalls: RecordedCall[];
   answerCallbackQueryCalls: RecordedAnswer[];
+  deleteMessagesCalls: RecordedDeleteMessages[];
 }
 
 export function createFakeBotContext(
@@ -26,16 +32,19 @@ export function createFakeBotContext(
     userId: number;
     callbackData: string;
     commandArgs: string;
+    messageId: number;
   }> = {},
 ): FakeBotContext {
   const sendMessageCalls: RecordedCall[] = [];
   const updateMessageCalls: RecordedCall[] = [];
   const answerCallbackQueryCalls: RecordedAnswer[] = [];
+  const deleteMessagesCalls: RecordedDeleteMessages[] = [];
 
   const ctx: BotContext = {
     userId: overrides.userId,
     callbackData: overrides.callbackData,
     commandArgs: overrides.commandArgs,
+    messageId: overrides.messageId,
     async sendMessage(text, keyboard, parseMode) {
       sendMessageCalls.push({ text, keyboard, parseMode });
     },
@@ -45,6 +54,9 @@ export function createFakeBotContext(
     async answerCallbackQuery(text, showAlert) {
       answerCallbackQueryCalls.push({ text, showAlert });
     },
+    async deleteMessages(fromMessageId, count) {
+      deleteMessagesCalls.push({ fromMessageId, count });
+    },
   };
 
   return {
@@ -52,6 +64,7 @@ export function createFakeBotContext(
     sendMessageCalls,
     updateMessageCalls,
     answerCallbackQueryCalls,
+    deleteMessagesCalls,
   };
 }
 

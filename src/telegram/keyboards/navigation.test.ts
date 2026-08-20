@@ -76,4 +76,25 @@ describe("buildDocumentKeyboard", () => {
       callback_data: "d:",
     });
   });
+
+  it("carries a cleanup hint on both Back and Home when the document overflowed into multiple messages", () => {
+    const keyboard = buildDocumentKeyboard("networking-mastery/01-tcp.md", {
+      firstMessageId: 42,
+      count: 2,
+    });
+    expect(keyboard.inline_keyboard).toEqual([
+      [
+        { text: "⬅️ Back", callback_data: "d:networking-mastery%42+2" },
+        { text: "🏠 Home", callback_data: "d:%42+2" },
+      ],
+    ]);
+  });
+
+  it("omits the cleanup hint when the document fit in a single message", () => {
+    const keyboard = buildDocumentKeyboard("networking-mastery/01-tcp.md");
+    expect(keyboard.inline_keyboard[0]).toEqual([
+      { text: "⬅️ Back", callback_data: "d:networking-mastery" },
+      { text: "🏠 Home", callback_data: "d:" },
+    ]);
+  });
 });

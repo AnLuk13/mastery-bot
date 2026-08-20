@@ -1,6 +1,6 @@
 import { InlineKeyboard } from "grammy";
 import type { ContentProvider } from "@/content";
-import { encodeNavigateCallbackData } from "../callbackData";
+import { encodeNavigateCallbackData, type CleanupHint } from "../callbackData";
 import { buildDirectoryKeyboard } from "../keyboards/navigation";
 import type { BotContext } from "../types";
 import { describeContentError } from "../userMessages";
@@ -20,11 +20,16 @@ export async function renderDirectory(
   ctx: BotContext,
   provider: ContentProvider,
   canonicalPath: string,
+  cleanup?: CleanupHint,
 ): Promise<void> {
   // Acknowledge before doing any slow work (GitHub fetch, message edit): Telegram
   // expires a callback query after a short window, and answering late causes it to
   // retry-deliver the update, compounding the delay. See webhookHandler design notes.
   await ctx.answerCallbackQuery();
+
+  if (cleanup) {
+    await ctx.deleteMessages(cleanup.firstMessageId, cleanup.count);
+  }
 
   try {
     const entries = await provider.listDirectory(canonicalPath);
@@ -36,7 +41,11 @@ export async function renderDirectory(
 }
 
 export function createDirectoryCallbackHandler(provider: ContentProvider) {
-  return async (ctx: BotContext, canonicalPath: string): Promise<void> => {
-    await renderDirectory(ctx, provider, canonicalPath);
+  return async (
+    ctx: BotContext,
+    canonicalPath: string,
+    cleanup?: CleanupHint,
+  ): Promise<void> => {
+    await renderDirectory(ctx, provider, canonicalPath, cleanup);
   };
 }

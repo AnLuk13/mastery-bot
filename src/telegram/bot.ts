@@ -52,7 +52,12 @@ export function createBot(options: CreateBotOptions): Bot {
 
     switch (decoded.type) {
       case "directory":
-        await renderDirectory(ctx, contentProvider, decoded.path);
+        await renderDirectory(
+          ctx,
+          contentProvider,
+          decoded.path,
+          decoded.cleanup,
+        );
         break;
       case "document":
         await createDocumentCallbackHandler(contentProvider)(ctx, decoded.path);

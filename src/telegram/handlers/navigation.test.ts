@@ -95,6 +95,33 @@ describe("renderDirectory", () => {
 
     expect(callOrder).toEqual(["answerCallbackQuery", "listDirectory"]);
   });
+
+  it("deletes the stale overflow messages when a cleanup hint is present, before showing the menu (Back/Home from a long document)", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+    });
+    const { ctx, deleteMessagesCalls, updateMessageCalls } =
+      createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "networking-mastery", {
+      firstMessageId: 100,
+      count: 3,
+    });
+
+    expect(deleteMessagesCalls).toEqual([{ fromMessageId: 100, count: 3 }]);
+    expect(updateMessageCalls).toHaveLength(1); // still shows exactly one menu message, nothing left stacked
+  });
+
+  it("does not attempt any cleanup when no hint is given (the normal case)", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+    });
+    const { ctx, deleteMessagesCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "networking-mastery");
+
+    expect(deleteMessagesCalls).toHaveLength(0);
+  });
 });
 
 describe("createDirectoryCallbackHandler", () => {
@@ -109,5 +136,19 @@ describe("createDirectoryCallbackHandler", () => {
     await createDirectoryCallbackHandler(provider)(ctx, "networking-mastery");
 
     expect(updateMessageCalls[0].text).toBe("📁 networking-mastery");
+  });
+
+  it("passes a cleanup hint through to renderDirectory", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+    });
+    const { ctx, deleteMessagesCalls } = createFakeBotContext();
+
+    await createDirectoryCallbackHandler(provider)(ctx, "networking-mastery", {
+      firstMessageId: 7,
+      count: 1,
+    });
+
+    expect(deleteMessagesCalls).toEqual([{ fromMessageId: 7, count: 1 }]);
   });
 });

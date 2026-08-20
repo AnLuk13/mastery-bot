@@ -7,17 +7,36 @@ import { normalizeRelativePath } from "@/content";
  * own). Telegram limits callback_data to 64 bytes UTF-8, so paths that would
  * exceed that are routed to a dedicated "too long" callback instead of being
  * silently dropped or truncated into something unsafe.
+ *
+ * A directory callback can optionally carry a "cleanup" hint: when opening a
+ * document that didn't fit in one Telegram message, the extra messages sent
+ * for the overflow are a fixed run of consecutive message IDs starting right
+ * after the message being edited (true for a private chat with a single bot
+ * sending them in a tight sequential loop, per Telegram's per-chat message
+ * ID allocation). Encoding {firstMessageId, count} on Back/Home lets a later,
+ * unrelated invocation delete that entire run before showing the menu again
+ * — still no server-side state, just more information riding in the same
+ * callback_data. `%` is the delimiter because normalizeRelativePath rejects
+ * it in any path outright, so it can never collide with real content.
  */
 
 export const MAX_CALLBACK_DATA_BYTES = 64;
 
 const DIRECTORY_PREFIX = "d:";
 const DOCUMENT_PREFIX = "f:";
+const CLEANUP_SEPARATOR = "%";
+const CLEANUP_PATTERN = /^(\d+)\+(\d+)$/;
 export const SEARCH_HELP_CALLBACK_DATA = "s";
 export const TOO_LONG_CALLBACK_DATA = "x";
 
+export interface CleanupHint {
+  /** message_id of the first extra message to delete (a consecutive run of `count` messages). */
+  firstMessageId: number;
+  count: number;
+}
+
 export type DecodedCallback =
-  | { type: "directory"; path: string }
+  | { type: "directory"; path: string; cleanup?: CleanupHint }
   | { type: "document"; path: string }
   | { type: "search-help" }
   | { type: "too-long" }
@@ -31,14 +50,27 @@ export function isCallbackDataTooLarge(data: string): boolean {
   return byteLength(data) > MAX_CALLBACK_DATA_BYTES;
 }
 
-/** Builds directory/document callback_data, or the "too long" sentinel if it would exceed Telegram's limit. */
+/**
+ * Builds directory/document callback_data, or the "too long" sentinel if it
+ * would exceed Telegram's limit. A `cleanup` hint is only ever meaningful for
+ * "directory" (Back/Home always navigate to a directory) and is dropped
+ * automatically — navigation still works, it just won't clean up stale
+ * messages — if adding it would push the data over budget.
+ */
 export function encodeNavigateCallbackData(
   kind: "directory" | "document",
   canonicalPath: string,
+  cleanup?: CleanupHint,
 ): string {
   const prefix = kind === "directory" ? DIRECTORY_PREFIX : DOCUMENT_PREFIX;
-  const data = `${prefix}${canonicalPath}`;
-  return isCallbackDataTooLarge(data) ? TOO_LONG_CALLBACK_DATA : data;
+  const base = `${prefix}${canonicalPath}`;
+
+  if (cleanup && cleanup.count > 0) {
+    const withCleanup = `${base}${CLEANUP_SEPARATOR}${cleanup.firstMessageId}+${cleanup.count}`;
+    if (!isCallbackDataTooLarge(withCleanup)) return withCleanup;
+  }
+
+  return isCallbackDataTooLarge(base) ? TOO_LONG_CALLBACK_DATA : base;
 }
 
 /** Never trusts callback_data: any unrecognized shape or unsafe path decodes to {type:"invalid"}. */
@@ -46,11 +78,28 @@ export function decodeCallbackData(data: string): DecodedCallback {
   if (data === SEARCH_HELP_CALLBACK_DATA) return { type: "search-help" };
   if (data === TOO_LONG_CALLBACK_DATA) return { type: "too-long" };
 
-  if (data.startsWith(DIRECTORY_PREFIX)) {
-    return decodePath("directory", data.slice(DIRECTORY_PREFIX.length));
-  }
   if (data.startsWith(DOCUMENT_PREFIX)) {
     return decodePath("document", data.slice(DOCUMENT_PREFIX.length));
+  }
+
+  if (data.startsWith(DIRECTORY_PREFIX)) {
+    const rest = data.slice(DIRECTORY_PREFIX.length);
+
+    // Only ever split on "%" if what follows it actually parses as a cleanup
+    // hint. A real path can never contain "%" (normalizeRelativePath rejects
+    // it outright), so anything else — including an attempt like "%2e%2e" —
+    // must fall through to validating `rest` whole, which correctly rejects it,
+    // rather than risk truncating malicious input into a valid-looking path.
+    const separatorIndex = rest.lastIndexOf(CLEANUP_SEPARATOR);
+    if (separatorIndex !== -1) {
+      const cleanup = parseCleanupHint(rest.slice(separatorIndex + 1));
+      if (cleanup) {
+        const decoded = decodePath("directory", rest.slice(0, separatorIndex));
+        return decoded.type === "directory" ? { ...decoded, cleanup } : decoded;
+      }
+    }
+
+    return decodePath("directory", rest);
   }
 
   return { type: "invalid" };
@@ -65,4 +114,20 @@ function decodePath(
   } catch {
     return { type: "invalid" };
   }
+}
+
+function parseCleanupHint(raw: string): CleanupHint | undefined {
+  const match = CLEANUP_PATTERN.exec(raw);
+  if (!match) return undefined;
+
+  const firstMessageId = Number(match[1]);
+  const count = Number(match[2]);
+  if (
+    !Number.isSafeInteger(firstMessageId) ||
+    !Number.isSafeInteger(count) ||
+    count <= 0
+  ) {
+    return undefined;
+  }
+  return { firstMessageId, count };
 }

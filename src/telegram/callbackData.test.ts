@@ -30,6 +30,45 @@ describe("encodeNavigateCallbackData", () => {
     const data = encodeNavigateCallbackData("document", longPath);
     expect(data).toBe(TOO_LONG_CALLBACK_DATA);
   });
+
+  it("appends a cleanup hint for a directory callback", () => {
+    expect(
+      encodeNavigateCallbackData("directory", "networking-mastery", {
+        firstMessageId: 12345,
+        count: 2,
+      }),
+    ).toBe("d:networking-mastery%12345+2");
+  });
+
+  it("appends a cleanup hint to the root path", () => {
+    expect(
+      encodeNavigateCallbackData("directory", "", {
+        firstMessageId: 5,
+        count: 1,
+      }),
+    ).toBe("d:%5+1");
+  });
+
+  it("omits a zero-count cleanup hint", () => {
+    expect(
+      encodeNavigateCallbackData("directory", "networking-mastery", {
+        firstMessageId: 5,
+        count: 0,
+      }),
+    ).toBe("d:networking-mastery");
+  });
+
+  it("drops the cleanup hint (but keeps navigation working) if adding it would exceed the callback_data limit", () => {
+    const longPath = "a-very-long-folder-name/".repeat(2) + "sub";
+    const withoutCleanup = encodeNavigateCallbackData("directory", longPath);
+    expect(isCallbackDataTooLarge(withoutCleanup)).toBe(false);
+
+    const withHugeCleanup = encodeNavigateCallbackData("directory", longPath, {
+      firstMessageId: 999999999,
+      count: 999999999,
+    });
+    expect(withHugeCleanup).toBe(withoutCleanup);
+  });
 });
 
 describe("decodeCallbackData", () => {
@@ -93,6 +132,51 @@ describe("decodeCallbackData", () => {
       encodeNavigateCallbackData("document", path),
     );
     expect(decoded).toEqual({ type: "document", path });
+  });
+
+  it("decodes a directory callback carrying a cleanup hint", () => {
+    expect(decodeCallbackData("d:networking-mastery%12345+2")).toEqual({
+      type: "directory",
+      path: "networking-mastery",
+      cleanup: { firstMessageId: 12345, count: 2 },
+    });
+  });
+
+  it("decodes a root directory callback carrying a cleanup hint", () => {
+    expect(decodeCallbackData("d:%5+1")).toEqual({
+      type: "directory",
+      path: "",
+      cleanup: { firstMessageId: 5, count: 1 },
+    });
+  });
+
+  it("round-trips a cleanup hint through encode then decode", () => {
+    const cleanup = { firstMessageId: 999, count: 3 };
+    const decoded = decodeCallbackData(
+      encodeNavigateCallbackData("directory", "dotnet-mastery", cleanup),
+    );
+    expect(decoded).toEqual({
+      type: "directory",
+      path: "dotnet-mastery",
+      cleanup,
+    });
+  });
+
+  it("rejects the whole callback when the suffix after % doesn't parse as a cleanup hint (a real path can never contain %)", () => {
+    expect(decodeCallbackData("d:networking-mastery%not-a-hint")).toEqual({
+      type: "invalid",
+    });
+  });
+
+  it("still rejects %2e%2e-style traversal even with cleanup-hint parsing in play (the regression this guards)", () => {
+    expect(decodeCallbackData("d:%2e%2e")).toEqual({ type: "invalid" });
+    expect(decodeCallbackData("d:foo%2e%2e%12+1")).toEqual({ type: "invalid" });
+  });
+
+  it("rejects the whole callback (not just the cleanup hint) when the count is zero or malformed — this string never comes from our own encoder", () => {
+    expect(decodeCallbackData("d:networking-mastery%123+0")).toEqual({
+      type: "invalid",
+    });
   });
 });
 
