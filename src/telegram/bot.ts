@@ -1,5 +1,6 @@
 import { Bot, type BotConfig, type Context } from "grammy";
 import type { ContentProvider } from "@/content";
+import type { EditorConfig } from "@/lib/env";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import { adaptContext } from "./adapter";
 import { enforceAuthorization } from "./auth";
@@ -8,6 +9,12 @@ import { createAskHandler } from "./handlers/ask";
 import { createClearHandler } from "./handlers/clear";
 import { createDocumentCallbackHandler } from "./handlers/document";
 import { renderDirectory } from "./handlers/navigation";
+import {
+  createRevertHandler,
+  createSaveHandler,
+  isSaveClarifyContinuation,
+  type ContentWriterLike,
+} from "./handlers/save";
 import {
   createSearchCommandHandler,
   handleSearchHelpCallback,
@@ -25,6 +32,8 @@ export interface CreateBotOptions {
   contentProvider: ContentProvider;
   allowedUserIds: readonly number[];
   askDeps: AnswerQuestionDeps;
+  editors: readonly EditorConfig[];
+  contentWriter: ContentWriterLike;
   /** Pass to skip grammY's getMe network call, e.g. in tests. */
   botInfo?: BotConfig<Context>["botInfo"];
 }
@@ -59,23 +68,53 @@ export function createBot(options: CreateBotOptions): Bot {
     await createClearHandler(contentProvider)(adaptContext(grammyCtx));
   });
 
+  const saveHandler = createSaveHandler({
+    editors: options.editors,
+    contentProvider,
+    contentWriter: options.contentWriter,
+    groq: options.askDeps.groq,
+  });
+
+  bot.command("save", async (grammyCtx) => {
+    await saveHandler(adaptContext(grammyCtx));
+  });
+
+  // Unambiguous by message type alone — no command needed. Non-editors and
+  // unsupported file types are rejected inside the handler itself.
+  bot.on("message:document", async (grammyCtx) => {
+    await saveHandler(adaptContext(grammyCtx));
+  });
+
   const askHandler = createAskHandler(options.askDeps);
   bot.on("message:text", async (grammyCtx) => {
+    const ctx = adaptContext(grammyCtx);
     const text = grammyCtx.message.text;
     if (text.startsWith("/")) {
       // An unrecognized command (the known ones above already returned without
       // calling next()) — don't treat it as a question to the AI.
-      await adaptContext(grammyCtx).sendMessage(UNKNOWN_COMMAND_MESSAGE);
+      await ctx.sendMessage(UNKNOWN_COMMAND_MESSAGE);
       return;
     }
-    await askHandler(adaptContext(grammyCtx));
+    if (isSaveClarifyContinuation(ctx)) {
+      await saveHandler(ctx);
+      return;
+    }
+    await askHandler(ctx);
   });
+
+  const revertHandler = createRevertHandler(
+    options.editors,
+    options.contentWriter,
+  );
 
   bot.on("callback_query:data", async (grammyCtx) => {
     const ctx = adaptContext(grammyCtx);
     const decoded = decodeCallbackData(grammyCtx.callbackQuery.data);
 
     switch (decoded.type) {
+      case "revert":
+        await revertHandler(ctx, decoded.target);
+        break;
       case "directory":
         await renderDirectory(
           ctx,

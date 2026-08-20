@@ -26,9 +26,12 @@ export const MAX_CALLBACK_DATA_BYTES = 64;
 const DIRECTORY_PREFIX = "d:";
 const DOCUMENT_PREFIX = "f:";
 const LIMITS_PREFIX = "l:";
+const REVERT_PREFIX = "v:";
 const CLEANUP_SEPARATOR = "%";
 const CLEANUP_PATTERN = /^(\d+)\+(\d+)$/;
 const LIMITS_PATTERN = /^(\d+)-(\d+)-(\d+)-(\d+)$/;
+const COMMIT_SHA_ABBREV_LENGTH = 12;
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{6,40}$/;
 export const SEARCH_HELP_CALLBACK_DATA = "s";
 export const TOO_LONG_CALLBACK_DATA = "x";
 
@@ -38,11 +41,18 @@ export interface CleanupHint {
   count: number;
 }
 
+export interface RevertTarget {
+  path: string;
+  /** Abbreviated HEAD commit sha from immediately before the write being reverted (see GitHubContentWriter). */
+  beforeCommitSha: string;
+}
+
 export type DecodedCallback =
   | { type: "directory"; path: string; cleanup?: CleanupHint }
   | { type: "document"; path: string }
   | { type: "search-help" }
   | { type: "limits"; rateLimit: RateLimitInfo }
+  | { type: "revert"; target: RevertTarget }
   | { type: "too-long" }
   | { type: "invalid" };
 
@@ -91,6 +101,21 @@ export function encodeLimitsCallbackData(
   return isCallbackDataTooLarge(data) ? undefined : data;
 }
 
+/**
+ * Encodes a revert button: whichever invocation handles the tap re-derives
+ * everything it needs to undo the write (see GitHubContentWriter.revert) from
+ * just the path and an abbreviated "before" commit sha — no server state.
+ * Returns undefined (button should be omitted) if it doesn't fit the budget.
+ */
+export function encodeRevertCallbackData(
+  canonicalPath: string,
+  beforeCommitSha: string,
+): string | undefined {
+  const abbrev = beforeCommitSha.slice(0, COMMIT_SHA_ABBREV_LENGTH);
+  const data = `${REVERT_PREFIX}${canonicalPath}${CLEANUP_SEPARATOR}${abbrev}`;
+  return isCallbackDataTooLarge(data) ? undefined : data;
+}
+
 /** Never trusts callback_data: any unrecognized shape or unsafe path decodes to {type:"invalid"}. */
 export function decodeCallbackData(data: string): DecodedCallback {
   if (data === SEARCH_HELP_CALLBACK_DATA) return { type: "search-help" };
@@ -103,6 +128,11 @@ export function decodeCallbackData(data: string): DecodedCallback {
   if (data.startsWith(LIMITS_PREFIX)) {
     const rateLimit = parseRateLimit(data.slice(LIMITS_PREFIX.length));
     return rateLimit ? { type: "limits", rateLimit } : { type: "invalid" };
+  }
+
+  if (data.startsWith(REVERT_PREFIX)) {
+    const target = parseRevertTarget(data.slice(REVERT_PREFIX.length));
+    return target ? { type: "revert", target } : { type: "invalid" };
   }
 
   if (data.startsWith(DIRECTORY_PREFIX)) {
@@ -154,6 +184,22 @@ function parseRateLimit(raw: string): RateLimitInfo | undefined {
     return undefined;
   }
   return { remainingRequests, limitRequests, remainingTokens, limitTokens };
+}
+
+function parseRevertTarget(raw: string): RevertTarget | undefined {
+  const separatorIndex = raw.lastIndexOf(CLEANUP_SEPARATOR);
+  if (separatorIndex === -1) return undefined;
+
+  const sha = raw.slice(separatorIndex + 1);
+  if (!COMMIT_SHA_PATTERN.test(sha)) return undefined;
+
+  try {
+    const path = normalizeRelativePath(raw.slice(0, separatorIndex));
+    if (path === "") return undefined;
+    return { path, beforeCommitSha: sha };
+  } catch {
+    return undefined;
+  }
 }
 
 function parseCleanupHint(raw: string): CleanupHint | undefined {

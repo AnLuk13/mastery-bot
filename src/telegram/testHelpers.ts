@@ -35,6 +35,13 @@ export function createFakeBotContext(
     commandArgs: string;
     messageId: number;
     messageText: string;
+    replyToMessageText: string;
+    document: {
+      fileId: string;
+      fileName: string;
+      mimeType: string | undefined;
+    };
+    downloadDocument: (fileId: string) => Promise<string>;
   }> = {},
 ): FakeBotContext {
   const sendMessageCalls: RecordedCall[] = [];
@@ -49,6 +56,13 @@ export function createFakeBotContext(
     commandArgs: overrides.commandArgs,
     messageId: overrides.messageId,
     messageText: overrides.messageText,
+    replyToMessageText: overrides.replyToMessageText,
+    document: overrides.document,
+    downloadDocument:
+      overrides.downloadDocument ??
+      (async () => {
+        throw new Error("no fake document content configured");
+      }),
     async sendMessage(text, keyboard, parseMode) {
       sendMessageCalls.push({ text, keyboard, parseMode });
     },
@@ -88,4 +102,54 @@ export function createFakeContentProvider(
       }),
     search: overrides.search ?? (async () => []),
   };
+}
+
+export interface FakeContentWriter {
+  write(
+    path: string,
+    content: string,
+    message: string,
+  ): Promise<{ path: string; beforeCommitSha: string }>;
+  revert(path: string, beforeCommitSha: string, message: string): Promise<void>;
+}
+
+export interface RecordedWrite {
+  path: string;
+  content: string;
+  message: string;
+}
+
+export interface RecordedRevert {
+  path: string;
+  beforeCommitSha: string;
+  message: string;
+}
+
+export function createFakeContentWriter(
+  overrides: Partial<{
+    beforeCommitSha: string;
+    onWrite: (write: RecordedWrite) => void;
+    onRevert: (revert: RecordedRevert) => void;
+  }> = {},
+): {
+  writer: FakeContentWriter;
+  writes: RecordedWrite[];
+  reverts: RecordedRevert[];
+} {
+  const writes: RecordedWrite[] = [];
+  const reverts: RecordedRevert[] = [];
+
+  const writer: FakeContentWriter = {
+    async write(path, content, message) {
+      writes.push({ path, content, message });
+      overrides.onWrite?.({ path, content, message });
+      return { path, beforeCommitSha: overrides.beforeCommitSha ?? "commit-0" };
+    },
+    async revert(path, beforeCommitSha, message) {
+      reverts.push({ path, beforeCommitSha, message });
+      overrides.onRevert?.({ path, beforeCommitSha, message });
+    },
+  };
+
+  return { writer, writes, reverts };
 }

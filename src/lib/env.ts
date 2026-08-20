@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeRelativePath } from "@/content";
 
 const csvUserIds = z
   .string()
@@ -12,6 +13,51 @@ const csvUserIds = z
         .transform(Number),
     ),
   );
+
+export interface EditorConfig {
+  userId: number;
+  /** A single safe path segment: the top-level folder this editor's /save writes are confined to. */
+  folder: string;
+}
+
+const editorEntry = z
+  .string()
+  .regex(
+    /^\d+:.+$/,
+    "each entry must be formatted as <telegram-user-id>:<folder-name>",
+  )
+  .transform((entry, ctx): EditorConfig => {
+    const separatorIndex = entry.indexOf(":");
+    const userId = Number(entry.slice(0, separatorIndex));
+    const folder = entry.slice(separatorIndex + 1);
+
+    try {
+      const normalized = normalizeRelativePath(folder);
+      if (normalized === "" || normalized.includes("/")) {
+        throw new Error("must be a single folder name, not a nested path");
+      }
+      return { userId, folder: normalized };
+    } catch (error) {
+      ctx.addIssue({
+        code: "custom",
+        message: `invalid folder in "${entry}": ${error instanceof Error ? error.message : "invalid"}`,
+      });
+      return z.NEVER;
+    }
+  });
+
+// Comma-separated <telegram-user-id>:<folder-name> pairs. Optional and empty by
+// default: /save is entirely inactive for a deployment that doesn't configure it.
+const editorsSchema = z
+  .string()
+  .optional()
+  .transform((value) =>
+    (value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part !== ""),
+  )
+  .pipe(z.array(editorEntry));
 
 const baseSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1, "is required"),
@@ -29,6 +75,7 @@ const baseSchema = z.object({
   GITHUB_TOKEN: z.string().optional(),
   GROQ_API_KEY: z.string().min(1, "is required"),
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
+  EDITORS: editorsSchema,
 });
 
 const envSchema = baseSchema.superRefine((value, ctx) => {
@@ -57,6 +104,28 @@ const envSchema = baseSchema.superRefine((value, ctx) => {
         path: ["GITHUB_CONTENT_PATH"],
         message:
           "is required when CONTENT_PROVIDER=github (use an empty string for repo root)",
+      });
+    }
+  }
+
+  // /save always writes to GitHub directly, regardless of CONTENT_PROVIDER
+  // (which only governs reads) — so these are required whenever any editor
+  // is configured, even in local dev.
+  if (value.EDITORS.length > 0) {
+    for (const key of ["GITHUB_OWNER", "GITHUB_REPOSITORY"] as const) {
+      if (!value[key]) {
+        ctx.addIssue({
+          code: "custom",
+          path: [key],
+          message: "is required when EDITORS is set",
+        });
+      }
+    }
+    if (!value.GITHUB_TOKEN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["GITHUB_TOKEN"],
+        message: "is required (with write permission) when EDITORS is set",
       });
     }
   }

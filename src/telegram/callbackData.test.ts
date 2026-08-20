@@ -3,6 +3,7 @@ import {
   decodeCallbackData,
   encodeLimitsCallbackData,
   encodeNavigateCallbackData,
+  encodeRevertCallbackData,
   isCallbackDataTooLarge,
   MAX_CALLBACK_DATA_BYTES,
   SEARCH_HELP_CALLBACK_DATA,
@@ -200,6 +201,43 @@ describe("encodeLimitsCallbackData / decode", () => {
   it("rejects a malformed limits callback", () => {
     expect(decodeCallbackData("l:not-numbers")).toEqual({ type: "invalid" });
     expect(decodeCallbackData("l:1-2-3")).toEqual({ type: "invalid" });
+  });
+});
+
+describe("encodeRevertCallbackData / decode", () => {
+  it("round-trips a path and abbreviated commit sha through encode then decode", () => {
+    const data = encodeRevertCallbackData(
+      "antonio/networking/dns.md",
+      "abcdef1234567890abcdef1234567890abcdef12",
+    );
+    expect(data).toBe("v:antonio/networking/dns.md%abcdef123456");
+    expect(decodeCallbackData(data!)).toEqual({
+      type: "revert",
+      target: {
+        path: "antonio/networking/dns.md",
+        beforeCommitSha: "abcdef123456",
+      },
+    });
+  });
+
+  it("rejects a malformed revert callback", () => {
+    expect(decodeCallbackData("v:antonio/x.md%not-hex")).toEqual({
+      type: "invalid",
+    });
+    expect(decodeCallbackData("v:antonio/x.md")).toEqual({ type: "invalid" });
+  });
+
+  it("rejects a path traversal attempt embedded in a revert callback", () => {
+    expect(decodeCallbackData("v:../etc%abcdef123456")).toEqual({
+      type: "invalid",
+    });
+  });
+
+  it("returns undefined when the encoded data would exceed the callback_data limit", () => {
+    const longPath = "a-very-long-folder-name/".repeat(3) + "file.md";
+    expect(
+      encodeRevertCallbackData(longPath, "abcdef1234567890"),
+    ).toBeUndefined();
   });
 });
 

@@ -73,4 +73,58 @@ describe("parseEnv", () => {
     const env = parseEnv(baseValidLocalEnv);
     expect(env.GROQ_MODEL).toBe("openai/gpt-oss-120b");
   });
+
+  it("defaults EDITORS to an empty array when not set", () => {
+    const env = parseEnv(baseValidLocalEnv);
+    expect(env.EDITORS).toEqual([]);
+  });
+
+  it("parses EDITORS into user id / folder pairs", () => {
+    const env = parseEnv({
+      ...baseValidLocalEnv,
+      EDITORS: "712059530:antonio, 111:bob",
+      GITHUB_OWNER: "antonio",
+      GITHUB_REPOSITORY: "mastery",
+      GITHUB_TOKEN: "test-token",
+    });
+    expect(env.EDITORS).toEqual([
+      { userId: 712059530, folder: "antonio" },
+      { userId: 111, folder: "bob" },
+    ]);
+  });
+
+  it("rejects an EDITORS entry missing the folder", () => {
+    expect(() =>
+      parseEnv({ ...baseValidLocalEnv, EDITORS: "712059530" }),
+    ).toThrowError(/<telegram-user-id>:<folder-name>/);
+  });
+
+  it("rejects an EDITORS folder that isn't a single safe path segment", () => {
+    expect(() =>
+      parseEnv({ ...baseValidLocalEnv, EDITORS: "712059530:a/b" }),
+    ).toThrowError(/single folder name/);
+    expect(() =>
+      parseEnv({ ...baseValidLocalEnv, EDITORS: "712059530:.." }),
+    ).toThrowError();
+  });
+
+  it("requires GitHub write config when EDITORS is set, even with CONTENT_PROVIDER=local", () => {
+    expect(() =>
+      parseEnv({
+        ...baseValidLocalEnv,
+        EDITORS: "712059530:antonio",
+      }),
+    ).toThrowError(/GITHUB_OWNER/);
+  });
+
+  it("accepts EDITORS alongside CONTENT_PROVIDER=local when GitHub write config is present", () => {
+    const env = parseEnv({
+      ...baseValidLocalEnv,
+      EDITORS: "712059530:antonio",
+      GITHUB_OWNER: "antonio",
+      GITHUB_REPOSITORY: "mastery",
+      GITHUB_TOKEN: "test-token",
+    });
+    expect(env.EDITORS).toEqual([{ userId: 712059530, folder: "antonio" }]);
+  });
 });

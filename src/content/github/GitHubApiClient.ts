@@ -5,6 +5,7 @@ import {
   ContentProviderPermissionError,
   ContentProviderRateLimitedError,
   ContentProviderUnavailableError,
+  ContentWriteConflictError,
 } from "../errors";
 
 const GITHUB_API_BASE = "https://api.github.com";
@@ -49,11 +50,27 @@ const blobResponseSchema = z.object({
   encoding: z.string(),
 });
 
+const refResponseSchema = z.object({
+  object: z.object({ sha: z.string() }),
+});
+
+const putContentsResponseSchema = z.object({
+  content: z.object({ sha: z.string() }),
+  commit: z.object({ sha: z.string() }),
+});
+
 export type GitHubContentItem = z.infer<typeof contentItemSchema>;
 export type GitHubTreeEntry = z.infer<typeof treeEntrySchema>;
 export interface GitHubTreeResult {
   entries: GitHubTreeEntry[];
   truncated: boolean;
+}
+
+export interface PutFileResult {
+  /** sha of the new commit this write created — captured by callers before writing, so a later revert can be scoped to just this one write. */
+  commitSha: string;
+  /** sha of the new blob — required by GitHub to make any further write to this same path. */
+  contentSha: string;
 }
 
 export interface GitHubApiClientOptions {
@@ -160,12 +177,73 @@ export class GitHubApiClient {
     return decodeBase64Content(parsed.data.content, parsed.data.encoding);
   }
 
-  private buildContentsUrl(githubPath: string, ref: string): string {
+  /** The current HEAD commit sha for `branch` — callers capture this immediately before a write, to scope a later revert to exactly that one change. */
+  async getBranchHeadSha(branch: string): Promise<string> {
+    const url = `${GITHUB_API_BASE}/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/git/ref/heads/${encodeURIComponent(branch)}`;
+    const json = await this.requestJson(url, "");
+    const parsed = refResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new ContentProviderUnavailableError(
+        "GitHub returned an unexpected ref response shape",
+      );
+    }
+    return parsed.data.object.sha;
+  }
+
+  /**
+   * Creates or updates a file. `sha` is the file's current blob sha and is
+   * required when overwriting an existing file (GitHub rejects a create-only
+   * write, and rejects an update whose sha doesn't match the current one —
+   * surfaced as ContentWriteConflictError).
+   */
+  async createOrUpdateFile(
+    githubPath: string,
+    content: string,
+    message: string,
+    branch: string,
+    sha?: string,
+  ): Promise<PutFileResult> {
+    const url = this.buildContentsUrl(githubPath, undefined);
+    const json = await this.mutateJson(url, "PUT", githubPath, {
+      message,
+      content: Buffer.from(content, "utf8").toString("base64"),
+      branch,
+      ...(sha ? { sha } : {}),
+    });
+    const parsed = putContentsResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new ContentProviderUnavailableError(
+        "GitHub returned an unexpected write response shape",
+      );
+    }
+    return {
+      commitSha: parsed.data.commit.sha,
+      contentSha: parsed.data.content.sha,
+    };
+  }
+
+  /** Deletes a file; `sha` must match its current blob sha. */
+  async deleteFile(
+    githubPath: string,
+    sha: string,
+    message: string,
+    branch: string,
+  ): Promise<void> {
+    const url = this.buildContentsUrl(githubPath, undefined);
+    await this.mutateJson(url, "DELETE", githubPath, { message, sha, branch });
+  }
+
+  /** `ref` selects a point in history for a read; omit it for a write (which targets `branch` in the request body instead). */
+  private buildContentsUrl(
+    githubPath: string,
+    ref: string | undefined,
+  ): string {
     const segments =
       githubPath === "" ? [] : githubPath.split("/").map(encodeURIComponent);
     const base = `${GITHUB_API_BASE}/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/contents`;
     const withPath =
       segments.length > 0 ? `${base}/${segments.join("/")}` : base;
+    if (ref === undefined) return withPath;
     const url = new URL(withPath);
     url.searchParams.set("ref", ref);
     return url.toString();
@@ -209,12 +287,47 @@ export class GitHubApiClient {
     }
   }
 
+  private async mutateJson(
+    url: string,
+    method: "PUT" | "DELETE",
+    notFoundPath: string,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(url, {
+        method,
+        headers: { ...this.authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new ContentProviderUnavailableError(
+        "Network error while contacting GitHub",
+      );
+    }
+
+    if (!response.ok) {
+      await this.throwForStatus(response, notFoundPath);
+    }
+
+    try {
+      return await response.json();
+    } catch {
+      throw new ContentProviderUnavailableError(
+        "GitHub returned a malformed response",
+      );
+    }
+  }
+
   private async throwForStatus(
     response: Response,
     notFoundPath: string,
   ): Promise<never> {
     if (response.status === 404) {
       throw new ContentNotFoundError(notFoundPath);
+    }
+    if (response.status === 409) {
+      throw new ContentWriteConflictError();
     }
     if (response.status === 401) {
       throw new ContentProviderAuthError();

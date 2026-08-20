@@ -44,3 +44,11 @@ export class ContentProviderUnavailableError extends Error {
     this.name = "ContentProviderUnavailableError";
   }
 }
+
+/** A write was rejected because the file changed since the caller last read its sha (GitHub 409). */
+export class ContentWriteConflictError extends Error {
+  constructor(message = "The file changed since it was last read") {
+    super(message);
+    this.name = "ContentWriteConflictError";
+  }
+}

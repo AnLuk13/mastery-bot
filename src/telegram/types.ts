@@ -16,6 +16,14 @@ export interface BotContext {
   readonly messageId: number | undefined;
   /** Text of an incoming plain message; undefined for callbacks and commands. */
   readonly messageText: string | undefined;
+  /** Text of the message this one is a Telegram reply to, if any (used to detect a save-clarify follow-up). */
+  readonly replyToMessageText: string | undefined;
+  /** Present when the incoming message is a file upload. */
+  readonly document:
+    | { fileId: string; fileName: string; mimeType: string | undefined }
+    | undefined;
+  /** Downloads a document's text content. Throws if it's too large or can't be fetched. */
+  downloadDocument(fileId: string): Promise<string>;
   sendMessage(
     text: string,
     keyboard?: InlineKeyboard,

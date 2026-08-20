@@ -1,3 +1,4 @@
+import type { EditorConfig } from "@/lib/env";
 import type { BotContext } from "./types";
 import { ACCESS_DENIED_MESSAGE } from "./userMessages";
 
@@ -6,6 +7,15 @@ export function isAuthorizedUser(
   allowedUserIds: readonly number[],
 ): boolean {
   return userId !== undefined && allowedUserIds.includes(userId);
+}
+
+/** The folder this user's /save writes are confined to, or undefined if they're not an editor. */
+export function findEditorFolder(
+  userId: number | undefined,
+  editors: readonly EditorConfig[],
+): string | undefined {
+  if (userId === undefined) return undefined;
+  return editors.find((editor) => editor.userId === userId)?.folder;
 }
 
 /**

@@ -2,7 +2,10 @@ import { Bot } from "grammy";
 import { describe, expect, it } from "vitest";
 import { GroqClient } from "@/rag/groqClient";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
-import { createFakeContentProvider } from "./testHelpers";
+import {
+  createFakeContentProvider,
+  createFakeContentWriter,
+} from "./testHelpers";
 import { createBot } from "./bot";
 
 const fakeAskDeps: AnswerQuestionDeps = {
@@ -45,6 +48,8 @@ describe("createBot", () => {
       contentProvider: createFakeContentProvider(),
       allowedUserIds: [1],
       askDeps: fakeAskDeps,
+      editors: [],
+      contentWriter: createFakeContentWriter().writer,
       botInfo: fakeBotInfo,
     });
 

@@ -5,6 +5,7 @@ import {
   ContentProviderPermissionError,
   ContentProviderRateLimitedError,
   ContentProviderUnavailableError,
+  ContentWriteConflictError,
 } from "../errors";
 import { GitHubApiClient } from "./GitHubApiClient";
 import {
@@ -142,6 +143,120 @@ describe("GitHubApiClient authentication", () => {
     const client = makeClient(fetchImpl);
     await expect(client.getContents("", "main", "")).rejects.toThrow(
       ContentProviderAuthError,
+    );
+  });
+});
+
+describe("GitHubApiClient.getBranchHeadSha", () => {
+  it("returns the branch's current commit sha", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    const sha = await client.getBranchHeadSha("main");
+    expect(sha).toBe("commit-0");
+  });
+
+  it("throws ContentNotFoundError for an unknown branch", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await expect(client.getBranchHeadSha("no-such-branch")).rejects.toThrow(
+      ContentNotFoundError,
+    );
+  });
+});
+
+describe("GitHubApiClient write flow", () => {
+  it("creates a new file and advances the branch head", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    const before = await client.getBranchHeadSha("main");
+
+    const result = await client.createOrUpdateFile(
+      "new-topic/note.md",
+      "# New note",
+      "add note",
+      "main",
+    );
+    expect(result.contentSha).toBe("sha:new-topic/note.md");
+
+    const after = await client.getBranchHeadSha("main");
+    expect(after).not.toBe(before);
+
+    const item = await client.getContents(
+      "new-topic/note.md",
+      "main",
+      "new-topic/note.md",
+    );
+    if (Array.isArray(item)) throw new Error("expected file");
+    expect(await client.getFileContent(item, "new-topic/note.md")).toBe(
+      "# New note",
+    );
+  });
+
+  it("updates an existing file when given its current sha", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await client.createOrUpdateFile(
+      "00-index.md",
+      "# Updated index",
+      "update",
+      "main",
+      "sha:00-index.md",
+    );
+
+    const item = await client.getContents("00-index.md", "main", "00-index.md");
+    if (Array.isArray(item)) throw new Error("expected file");
+    expect(await client.getFileContent(item, "00-index.md")).toBe(
+      "# Updated index",
+    );
+  });
+
+  it("throws ContentWriteConflictError updating with a stale sha", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await expect(
+      client.createOrUpdateFile(
+        "00-index.md",
+        "# Updated index",
+        "update",
+        "main",
+        "sha:stale",
+      ),
+    ).rejects.toThrow(ContentWriteConflictError);
+  });
+
+  it("deletes a file given its current sha", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await client.deleteFile("00-index.md", "sha:00-index.md", "remove", "main");
+
+    await expect(
+      client.getContents("00-index.md", "main", "00-index.md"),
+    ).rejects.toThrow(ContentNotFoundError);
+  });
+
+  it("reads a path as of an older commit after a later write changed it", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    const beforeSha = await client.getBranchHeadSha("main");
+    await client.createOrUpdateFile(
+      "00-index.md",
+      "# Updated index",
+      "update",
+      "main",
+      "sha:00-index.md",
+    );
+
+    const historical = await client.getContents(
+      "00-index.md",
+      beforeSha,
+      "00-index.md",
+    );
+    if (Array.isArray(historical)) throw new Error("expected file");
+    expect(await client.getFileContent(historical, "00-index.md")).toBe(
+      "# Index",
+    );
+
+    const current = await client.getContents(
+      "00-index.md",
+      "main",
+      "00-index.md",
+    );
+    if (Array.isArray(current)) throw new Error("expected file");
+    expect(await client.getFileContent(current, "00-index.md")).toBe(
+      "# Updated index",
     );
   });
 });

@@ -30,6 +30,10 @@ interface FlatFile {
   sha: string;
 }
 
+function cloneTree(node: MockDirNode): MockDirNode {
+  return JSON.parse(JSON.stringify(node)) as MockDirNode;
+}
+
 function flatten(node: MockDirNode, prefix = ""): FlatFile[] {
   const out: FlatFile[] = [];
   for (const [name, child] of Object.entries(node.children)) {
@@ -58,6 +62,42 @@ function getNodeAtPath(
   return current;
 }
 
+function ensureDir(root: MockDirNode, segments: string[]): MockDirNode {
+  let current = root;
+  for (const segment of segments) {
+    const existing = current.children[segment];
+    if (existing && existing.type === "dir") {
+      current = existing;
+    } else {
+      const created: MockDirNode = { type: "dir", children: {} };
+      current.children[segment] = created;
+      current = created;
+    }
+  }
+  return current;
+}
+
+function setFileAtPath(
+  root: MockDirNode,
+  targetPath: string,
+  content: string,
+): void {
+  const segments = targetPath.split("/");
+  const fileName = segments.pop() as string;
+  ensureDir(root, segments).children[fileName] = { type: "file", content };
+}
+
+function deleteFileAtPath(root: MockDirNode, targetPath: string): boolean {
+  const segments = targetPath.split("/");
+  const fileName = segments.pop() as string;
+  const parent = getNodeAtPath(root, segments.join("/"));
+  if (!parent || parent.type !== "dir" || !(fileName in parent.children)) {
+    return false;
+  }
+  delete parent.children[fileName];
+  return true;
+}
+
 function jsonResponse(
   status: number,
   body: unknown,
@@ -72,25 +112,37 @@ function jsonResponse(
 export interface MockGitHubOptions {
   owner?: string;
   repo?: string;
+  branch?: string;
   /** If set, requests without a matching Authorization header get a 401. */
   requireToken?: string;
 }
 
 /**
- * Builds a fetch-compatible function that answers GitHub Contents API,
- * Git Trees API, and Git Blobs API requests against an in-memory tree.
+ * Builds a fetch-compatible function that answers GitHub Contents API, Git
+ * Trees/Blobs API, ref, and write (PUT/DELETE contents) requests against an
+ * in-memory tree. Writes mutate the tree and record a new "commit" snapshot,
+ * so a subsequent read with `?ref=<that commit's parent sha>` sees the state
+ * from just before the write — enough to exercise a real revert flow.
  */
 export function createMockGitHubFetch(
   root: MockDirNode,
   options: MockGitHubOptions = {},
 ): typeof fetch {
+  // Defensive clone: writes mutate this tree in place, and callers often pass
+  // a fixture shared across many tests — never mutate what they handed us.
+  root = cloneTree(root);
   const owner = options.owner ?? "test-owner";
   const repo = options.repo ?? "test-repo";
+  const branch = options.branch ?? "main";
   const apiRoot = `https://api.github.com/repos/${owner}/${repo}`;
   const contentsPrefix = `${apiRoot}/contents`;
   const treePrefix = `${apiRoot}/git/trees/`;
   const blobPrefix = `${apiRoot}/git/blobs/`;
-  const flatFiles = flatten(root);
+  const refPrefix = `${apiRoot}/git/ref/heads/`;
+
+  let headSha = "commit-0";
+  const history = new Map<string, MockDirNode>([[headSha, cloneTree(root)]]);
+  let commitCounter = 0;
 
   const mockFetch = async (
     input: string | URL | Request,
@@ -102,6 +154,7 @@ export function createMockGitHubFetch(
         : input instanceof URL
           ? input.toString()
           : input.url;
+    const method = (init?.method ?? "GET").toUpperCase();
 
     if (options.requireToken) {
       const headers = new Headers(init?.headers);
@@ -111,9 +164,19 @@ export function createMockGitHubFetch(
       }
     }
 
+    if (rawUrl.startsWith(refPrefix)) {
+      const requestedBranch = decodeURIComponent(
+        rawUrl.slice(refPrefix.length),
+      );
+      if (requestedBranch !== branch) {
+        return jsonResponse(404, { message: "Not Found" });
+      }
+      return jsonResponse(200, { object: { sha: headSha } });
+    }
+
     if (rawUrl.startsWith(blobPrefix)) {
       const sha = decodeURIComponent(rawUrl.slice(blobPrefix.length));
-      const entry = flatFiles.find((f) => f.sha === sha);
+      const entry = flatten(root).find((f) => f.sha === sha);
       if (!entry) return jsonResponse(404, { message: "Not Found" });
       return jsonResponse(200, {
         sha,
@@ -123,6 +186,7 @@ export function createMockGitHubFetch(
     }
 
     if (rawUrl.startsWith(treePrefix)) {
+      const flatFiles = flatten(root);
       return jsonResponse(200, {
         sha: "root-tree-sha",
         truncated: false,
@@ -145,7 +209,53 @@ export function createMockGitHubFetch(
       const targetPath = decodeURIComponent(
         rawPath.startsWith("/") ? rawPath.slice(1) : rawPath,
       );
-      const node = getNodeAtPath(root, targetPath);
+
+      if (method === "PUT") {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        const existing = getNodeAtPath(root, targetPath);
+        const expectedSha =
+          existing && existing.type === "file" ? `sha:${targetPath}` : null;
+        if (expectedSha !== null && body.sha !== expectedSha) {
+          return jsonResponse(409, { message: "sha does not match" });
+        }
+        if (expectedSha === null && body.sha) {
+          return jsonResponse(409, { message: "file does not exist" });
+        }
+
+        const content = Buffer.from(body.content, "base64").toString("utf8");
+        setFileAtPath(root, targetPath, content);
+        commitCounter++;
+        headSha = `commit-${commitCounter}`;
+        history.set(headSha, cloneTree(root));
+
+        return jsonResponse(200, {
+          content: { sha: `sha:${targetPath}` },
+          commit: { sha: headSha },
+        });
+      }
+
+      if (method === "DELETE") {
+        const body = init?.body ? JSON.parse(String(init.body)) : {};
+        const existing = getNodeAtPath(root, targetPath);
+        if (!existing || existing.type !== "file") {
+          return jsonResponse(404, { message: "Not Found" });
+        }
+        if (body.sha !== `sha:${targetPath}`) {
+          return jsonResponse(409, { message: "sha does not match" });
+        }
+        deleteFileAtPath(root, targetPath);
+        commitCounter++;
+        headSha = `commit-${commitCounter}`;
+        history.set(headSha, cloneTree(root));
+
+        return jsonResponse(200, { commit: { sha: headSha } });
+      }
+
+      const ref = url.searchParams.get("ref");
+      const tree = ref && ref !== branch ? history.get(ref) : root;
+      if (!tree) return jsonResponse(404, { message: "Not Found" });
+
+      const node = getNodeAtPath(tree, targetPath);
       if (!node) return jsonResponse(404, { message: "Not Found" });
 
       if (node.type === "file") {
