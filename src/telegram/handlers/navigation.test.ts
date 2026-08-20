@@ -141,6 +141,105 @@ describe("renderDirectory", () => {
     expect(updateMessageCalls[0].text).toBe("📄 Not found.");
   });
 
+  it("collapses root straight into a lone visible top-level folder's contents, keeping the root title and Search keyboard", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async (path) => {
+        if (path === "") {
+          return [{ type: "directory", name: "antonio", path: "antonio" }];
+        }
+        if (path === "antonio") {
+          return [
+            {
+              type: "directory",
+              name: "ai-mastery",
+              path: "antonio/ai-mastery",
+            },
+            {
+              type: "directory",
+              name: "networking-mastery",
+              path: "antonio/networking-mastery",
+            },
+          ];
+        }
+        throw new Error(`unexpected listDirectory(${path})`);
+      },
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+    });
+
+    await renderDirectory(ctx, provider, "", []);
+
+    expect(updateMessageCalls[0].text).toBe("📚 Mastery");
+    const rows = updateMessageCalls[0].keyboard?.inline_keyboard ?? [];
+    expect(rows.flat()).toEqual([
+      { text: "📁 ai-mastery", callback_data: "d:antonio/ai-mastery" },
+      {
+        text: "📁 networking-mastery",
+        callback_data: "d:antonio/networking-mastery",
+      },
+      { text: "🔎 Search", callback_data: "s" },
+    ]);
+  });
+
+  it("collapses through a chain of lone folders, not just one level", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async (path) => {
+        if (path === "") {
+          return [{ type: "directory", name: "a", path: "a" }];
+        }
+        if (path === "a") {
+          return [{ type: "directory", name: "b", path: "a/b" }];
+        }
+        if (path === "a/b") {
+          return [{ type: "document", name: "note.md", path: "a/b/note.md" }];
+        }
+        throw new Error(`unexpected listDirectory(${path})`);
+      },
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "", []);
+
+    const rows = updateMessageCalls[0].keyboard?.inline_keyboard ?? [];
+    expect(rows.flat()[0]).toEqual({
+      text: "📄 note.md",
+      callback_data: "f:a/b/note.md",
+    });
+  });
+
+  it("does not collapse when root has more than one visible entry", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => entries,
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "", []);
+
+    const rows = updateMessageCalls[0].keyboard?.inline_keyboard ?? [];
+    expect(rows.flat()).toContainEqual({
+      text: "📁 networking-mastery",
+      callback_data: "d:networking-mastery",
+    });
+  });
+
+  it("does not collapse a lone entry that is itself a document, not a directory", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [
+        { type: "document", name: "00-index.md", path: "00-index.md" },
+      ],
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "", []);
+
+    const rows = updateMessageCalls[0].keyboard?.inline_keyboard ?? [];
+    expect(rows.flat()[0]).toEqual({
+      text: "📄 00-index.md",
+      callback_data: "f:00-index.md",
+    });
+  });
+
   it("filters entries in a folder private to another user out of a listing", async () => {
     const mixedEntries: ContentEntry[] = [
       { type: "directory", name: "ai-mastery", path: "ai-mastery" },

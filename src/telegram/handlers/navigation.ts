@@ -21,6 +21,49 @@ function directoryTitle(canonicalPath: string): string {
   return `📁 ${segments[segments.length - 1]}`;
 }
 
+const MAX_ROOT_COLLAPSE_DEPTH = 10;
+
+async function listVisible(
+  provider: ContentProvider,
+  path: string,
+  userId: number | undefined,
+  privateFolders: readonly PrivateFolderConfig[],
+) {
+  return (await provider.listDirectory(path)).filter((entry) =>
+    isPathVisible(entry.path, userId, privateFolders),
+  );
+}
+
+/**
+ * At root only: if everything the user can see collapses to a single
+ * top-level folder (their own, in the common case where PRIVATE_FOLDERS
+ * hides everyone else's), skip making them tap into it — show its contents
+ * directly. Keeps the "📚 Mastery" title and root-style keyboard (Search, no
+ * Back/Home) throughout, since this is still conceptually home.
+ */
+async function resolveRootEntries(
+  provider: ContentProvider,
+  userId: number | undefined,
+  privateFolders: readonly PrivateFolderConfig[],
+) {
+  let entries = await listVisible(provider, "", userId, privateFolders);
+  for (
+    let depth = 0;
+    depth < MAX_ROOT_COLLAPSE_DEPTH &&
+    entries.length === 1 &&
+    entries[0].type === "directory";
+    depth++
+  ) {
+    entries = await listVisible(
+      provider,
+      entries[0].path,
+      userId,
+      privateFolders,
+    );
+  }
+  return entries;
+}
+
 export async function renderDirectory(
   ctx: BotContext,
   provider: ContentProvider,
@@ -43,9 +86,15 @@ export async function renderDirectory(
     if (!isPathVisible(canonicalPath, ctx.userId, privateFolders)) {
       throw new ContentNotFoundError(canonicalPath);
     }
-    const entries = (await provider.listDirectory(canonicalPath)).filter(
-      (entry) => isPathVisible(entry.path, ctx.userId, privateFolders),
-    );
+    const entries =
+      canonicalPath === ""
+        ? await resolveRootEntries(provider, ctx.userId, privateFolders)
+        : await listVisible(
+            provider,
+            canonicalPath,
+            ctx.userId,
+            privateFolders,
+          );
     const keyboard = buildDirectoryKeyboard(entries, canonicalPath);
     await ctx.updateMessage(directoryTitle(canonicalPath), keyboard);
   } catch (error) {
