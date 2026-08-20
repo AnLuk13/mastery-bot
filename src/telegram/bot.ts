@@ -5,6 +5,7 @@ import { adaptContext } from "./adapter";
 import { enforceAuthorization } from "./auth";
 import { decodeCallbackData } from "./callbackData";
 import { createAskHandler } from "./handlers/ask";
+import { createClearHandler } from "./handlers/clear";
 import { createDocumentCallbackHandler } from "./handlers/document";
 import { renderDirectory } from "./handlers/navigation";
 import {
@@ -13,6 +14,7 @@ import {
 } from "./handlers/search";
 import { createStartHandler } from "./handlers/start";
 import {
+  formatRateLimitMessage,
   INVALID_NAVIGATION_MESSAGE,
   TOO_LONG_MESSAGE,
   UNKNOWN_COMMAND_MESSAGE,
@@ -53,6 +55,10 @@ export function createBot(options: CreateBotOptions): Bot {
     await createSearchCommandHandler(contentProvider)(adaptContext(grammyCtx));
   });
 
+  bot.command("clear", async (grammyCtx) => {
+    await createClearHandler(contentProvider)(adaptContext(grammyCtx));
+  });
+
   const askHandler = createAskHandler(options.askDeps);
   bot.on("message:text", async (grammyCtx) => {
     const text = grammyCtx.message.text;
@@ -83,6 +89,12 @@ export function createBot(options: CreateBotOptions): Bot {
         break;
       case "search-help":
         await handleSearchHelpCallback(ctx);
+        break;
+      case "limits":
+        await ctx.answerCallbackQuery(
+          formatRateLimitMessage(decoded.rateLimit),
+          true,
+        );
         break;
       case "too-long":
         await ctx.answerCallbackQuery(TOO_LONG_MESSAGE, true);

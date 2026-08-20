@@ -16,7 +16,8 @@ export function adaptContext(ctx: Context): BotContext {
     userId: ctx.from?.id,
     callbackData: ctx.callbackQuery?.data,
     commandArgs: typeof ctx.match === "string" ? ctx.match : undefined,
-    messageId: ctx.callbackQuery?.message?.message_id,
+    messageId:
+      ctx.callbackQuery?.message?.message_id ?? ctx.message?.message_id,
     messageText: ctx.callbackQuery ? undefined : ctx.message?.text,
 
     async sendMessage(text, keyboard, parseMode) {

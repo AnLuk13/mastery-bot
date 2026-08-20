@@ -27,10 +27,53 @@ describe("GroqClient.createChatCompletion", () => {
       }),
     });
 
-    const text = await client.createChatCompletion([
+    const result = await client.createChatCompletion([
       { role: "user", content: "hi" },
     ]);
-    expect(text).toBe("hello there");
+    expect(result.text).toBe("hello there");
+    expect(result.rateLimit).toBeUndefined();
+  });
+
+  it("parses rate-limit headers into the result when present", async () => {
+    const client = new GroqClient({
+      apiKey: "test-key",
+      model: "test-model",
+      fetchImpl: jsonFetch(
+        200,
+        { choices: [{ message: { content: "hi there" } }] },
+        {
+          "x-ratelimit-remaining-requests": "998",
+          "x-ratelimit-limit-requests": "1000",
+          "x-ratelimit-remaining-tokens": "7908",
+          "x-ratelimit-limit-tokens": "8000",
+        },
+      ),
+    });
+
+    const result = await client.createChatCompletion([
+      { role: "user", content: "hi" },
+    ]);
+    expect(result.rateLimit).toEqual({
+      remainingRequests: 998,
+      limitRequests: 1000,
+      remainingTokens: 7908,
+      limitTokens: 8000,
+    });
+  });
+
+  it("omits rate-limit info when headers are missing", async () => {
+    const client = new GroqClient({
+      apiKey: "test-key",
+      model: "test-model",
+      fetchImpl: jsonFetch(200, {
+        choices: [{ message: { content: "hi there" } }],
+      }),
+    });
+
+    const result = await client.createChatCompletion([
+      { role: "user", content: "hi" },
+    ]);
+    expect(result.rateLimit).toBeUndefined();
   });
 
   it("throws GroqUnavailableError on a network failure", async () => {

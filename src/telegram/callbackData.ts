@@ -1,4 +1,5 @@
 import { normalizeRelativePath } from "@/content";
+import type { RateLimitInfo } from "@/rag/groqClient";
 
 /**
  * Stateless navigation via Telegram callback_data: every button embeds the
@@ -24,8 +25,10 @@ export const MAX_CALLBACK_DATA_BYTES = 64;
 
 const DIRECTORY_PREFIX = "d:";
 const DOCUMENT_PREFIX = "f:";
+const LIMITS_PREFIX = "l:";
 const CLEANUP_SEPARATOR = "%";
 const CLEANUP_PATTERN = /^(\d+)\+(\d+)$/;
+const LIMITS_PATTERN = /^(\d+)-(\d+)-(\d+)-(\d+)$/;
 export const SEARCH_HELP_CALLBACK_DATA = "s";
 export const TOO_LONG_CALLBACK_DATA = "x";
 
@@ -39,6 +42,7 @@ export type DecodedCallback =
   | { type: "directory"; path: string; cleanup?: CleanupHint }
   | { type: "document"; path: string }
   | { type: "search-help" }
+  | { type: "limits"; rateLimit: RateLimitInfo }
   | { type: "too-long" }
   | { type: "invalid" };
 
@@ -73,6 +77,20 @@ export function encodeNavigateCallbackData(
   return isCallbackDataTooLarge(base) ? TOO_LONG_CALLBACK_DATA : base;
 }
 
+/**
+ * Encodes a snapshot of Groq's rate-limit headers (see groqClient.ts) directly
+ * into the button, the same "no server state" approach as navigation: whichever
+ * invocation handles the tap just formats the numbers it decodes, nothing is
+ * looked up. Returns undefined (button should be omitted) in the practically
+ * impossible case the numbers don't fit Telegram's budget.
+ */
+export function encodeLimitsCallbackData(
+  rateLimit: RateLimitInfo,
+): string | undefined {
+  const data = `${LIMITS_PREFIX}${rateLimit.remainingRequests}-${rateLimit.limitRequests}-${rateLimit.remainingTokens}-${rateLimit.limitTokens}`;
+  return isCallbackDataTooLarge(data) ? undefined : data;
+}
+
 /** Never trusts callback_data: any unrecognized shape or unsafe path decodes to {type:"invalid"}. */
 export function decodeCallbackData(data: string): DecodedCallback {
   if (data === SEARCH_HELP_CALLBACK_DATA) return { type: "search-help" };
@@ -80,6 +98,11 @@ export function decodeCallbackData(data: string): DecodedCallback {
 
   if (data.startsWith(DOCUMENT_PREFIX)) {
     return decodePath("document", data.slice(DOCUMENT_PREFIX.length));
+  }
+
+  if (data.startsWith(LIMITS_PREFIX)) {
+    const rateLimit = parseRateLimit(data.slice(LIMITS_PREFIX.length));
+    return rateLimit ? { type: "limits", rateLimit } : { type: "invalid" };
   }
 
   if (data.startsWith(DIRECTORY_PREFIX)) {
@@ -114,6 +137,23 @@ function decodePath(
   } catch {
     return { type: "invalid" };
   }
+}
+
+function parseRateLimit(raw: string): RateLimitInfo | undefined {
+  const match = LIMITS_PATTERN.exec(raw);
+  if (!match) return undefined;
+
+  const [remainingRequests, limitRequests, remainingTokens, limitTokens] = match
+    .slice(1)
+    .map(Number);
+  if (
+    ![remainingRequests, limitRequests, remainingTokens, limitTokens].every(
+      Number.isSafeInteger,
+    )
+  ) {
+    return undefined;
+  }
+  return { remainingRequests, limitRequests, remainingTokens, limitTokens };
 }
 
 function parseCleanupHint(raw: string): CleanupHint | undefined {

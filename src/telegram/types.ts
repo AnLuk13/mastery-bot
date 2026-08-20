@@ -12,7 +12,7 @@ export interface BotContext {
   readonly userId: number | undefined;
   readonly callbackData: string | undefined;
   readonly commandArgs: string | undefined;
-  /** message_id of the message this callback is attached to; undefined for a plain command. */
+  /** message_id of the callback's attached message, or of the incoming message itself for a command/plain message. */
   readonly messageId: number | undefined;
   /** Text of an incoming plain message; undefined for callbacks and commands. */
   readonly messageText: string | undefined;

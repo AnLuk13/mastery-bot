@@ -7,6 +7,7 @@ import {
   InvalidPathError,
 } from "@/content";
 import { GroqRateLimitedError, GroqUnavailableError } from "@/rag/errors";
+import type { RateLimitInfo } from "@/rag/groqClient";
 
 export const ACCESS_DENIED_MESSAGE = "🔒 This is a private bot.";
 export const INVALID_NAVIGATION_MESSAGE = "⚠️ Invalid navigation.";
@@ -52,4 +53,13 @@ export function describeAskError(error: unknown): string {
     return "⚠️ Couldn't get an answer right now. Please try again shortly.";
   }
   return "⚠️ Something went wrong answering that. Please try again.";
+}
+
+/** Formats a snapshot of Groq's rate limits (as of the answer that carried this button) for a toast alert. */
+export function formatRateLimitMessage(rateLimit: RateLimitInfo): string {
+  return (
+    `📊 Groq usage (as of that answer)\n` +
+    `Requests: ${rateLimit.remainingRequests}/${rateLimit.limitRequests} left\n` +
+    `Tokens: ${rateLimit.remainingTokens}/${rateLimit.limitTokens} left`
+  );
 }

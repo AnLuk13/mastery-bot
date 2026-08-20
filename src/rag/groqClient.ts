@@ -24,6 +24,55 @@ export interface GroqClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+export interface RateLimitInfo {
+  remainingRequests: number;
+  limitRequests: number;
+  remainingTokens: number;
+  limitTokens: number;
+}
+
+export interface ChatCompletionResult {
+  text: string;
+  /** Undefined if Groq omitted or malformed any of the rate-limit headers on this response. */
+  rateLimit: RateLimitInfo | undefined;
+}
+
+function parseRateLimitHeader(
+  headers: Headers,
+  name: string,
+): number | undefined {
+  const raw = headers.get(name);
+  if (raw === null) return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
+}
+
+function parseRateLimitHeaders(headers: Headers): RateLimitInfo | undefined {
+  const remainingRequests = parseRateLimitHeader(
+    headers,
+    "x-ratelimit-remaining-requests",
+  );
+  const limitRequests = parseRateLimitHeader(
+    headers,
+    "x-ratelimit-limit-requests",
+  );
+  const remainingTokens = parseRateLimitHeader(
+    headers,
+    "x-ratelimit-remaining-tokens",
+  );
+  const limitTokens = parseRateLimitHeader(headers, "x-ratelimit-limit-tokens");
+
+  if (
+    remainingRequests === undefined ||
+    limitRequests === undefined ||
+    remainingTokens === undefined ||
+    limitTokens === undefined
+  ) {
+    return undefined;
+  }
+  return { remainingRequests, limitRequests, remainingTokens, limitTokens };
+}
+
 /** Minimal typed client for Groq's OpenAI-compatible chat completions endpoint. */
 export class GroqClient {
   private readonly apiKey: string;
@@ -36,7 +85,9 @@ export class GroqClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async createChatCompletion(messages: ChatMessage[]): Promise<string> {
+  async createChatCompletion(
+    messages: ChatMessage[],
+  ): Promise<ChatCompletionResult> {
     let response: Response;
     try {
       response = await this.fetchImpl(`${GROQ_API_BASE}/chat/completions`, {
@@ -67,6 +118,8 @@ export class GroqClient {
       await this.throwForStatus(response);
     }
 
+    const rateLimit = parseRateLimitHeaders(response.headers);
+
     let json: unknown;
     try {
       json = await response.json();
@@ -86,7 +139,7 @@ export class GroqClient {
       // never reached a visible answer. Telegram also rejects empty messages.
       throw new GroqUnavailableError("Groq returned an empty completion");
     }
-    return content;
+    return { text: content, rateLimit };
   }
 
   private async throwForStatus(response: Response): Promise<never> {

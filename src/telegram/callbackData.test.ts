@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeCallbackData,
+  encodeLimitsCallbackData,
   encodeNavigateCallbackData,
   isCallbackDataTooLarge,
   MAX_CALLBACK_DATA_BYTES,
@@ -177,6 +178,28 @@ describe("decodeCallbackData", () => {
     expect(decodeCallbackData("d:networking-mastery%123+0")).toEqual({
       type: "invalid",
     });
+  });
+});
+
+describe("encodeLimitsCallbackData / decode", () => {
+  it("round-trips rate limit info through encode then decode", () => {
+    const rateLimit = {
+      remainingRequests: 998,
+      limitRequests: 1000,
+      remainingTokens: 7908,
+      limitTokens: 8000,
+    };
+    const data = encodeLimitsCallbackData(rateLimit);
+    expect(data).toBe("l:998-1000-7908-8000");
+    expect(decodeCallbackData(data!)).toEqual({
+      type: "limits",
+      rateLimit,
+    });
+  });
+
+  it("rejects a malformed limits callback", () => {
+    expect(decodeCallbackData("l:not-numbers")).toEqual({ type: "invalid" });
+    expect(decodeCallbackData("l:1-2-3")).toEqual({ type: "invalid" });
   });
 });
 

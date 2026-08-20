@@ -34,7 +34,7 @@ function makeDeps(
     groq: overrides.groq ?? {
       createChatCompletion: async (messages: ChatMessage[]) => {
         capturedMessages.push(messages);
-        return "a generated answer";
+        return { text: "a generated answer", rateLimit: undefined };
       },
     },
     capturedMessages,
@@ -48,6 +48,22 @@ describe("answerQuestion", () => {
 
     expect(result.text).toBe("a generated answer");
     expect(result.sources).toEqual(["ai-mastery/05-embeddings.md"]);
+  });
+
+  it("propagates rate-limit info from the model call", async () => {
+    const rateLimit = {
+      remainingRequests: 1,
+      limitRequests: 2,
+      remainingTokens: 3,
+      limitTokens: 4,
+    };
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async () => ({ text: "answer", rateLimit }),
+      },
+    });
+    const result = await answerQuestion("q", deps);
+    expect(result.rateLimit).toEqual(rateLimit);
   });
 
   it("omits sources whose retrieved chunk falls below the relevance threshold", async () => {

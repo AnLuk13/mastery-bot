@@ -1,5 +1,9 @@
 import { InlineKeyboard } from "grammy";
-import { encodeNavigateCallbackData } from "../callbackData";
+import type { RateLimitInfo } from "@/rag/groqClient";
+import {
+  encodeLimitsCallbackData,
+  encodeNavigateCallbackData,
+} from "../callbackData";
 
 const MAX_SOURCE_BUTTONS = 4;
 
@@ -8,9 +12,14 @@ function basename(canonicalPath: string): string {
   return segments[segments.length - 1];
 }
 
-/** One row per cited source document (so the user can jump straight to it), plus Home. */
+/**
+ * One row per cited source document (so the user can jump straight to it), an
+ * optional Groq usage row (tap to see a toast — Telegram buttons can't be
+ * inert/label-only), and Home.
+ */
 export function buildAskResultKeyboard(
   sources: readonly string[],
+  rateLimit?: RateLimitInfo,
 ): InlineKeyboard {
   const keyboard = new InlineKeyboard();
 
@@ -21,6 +30,13 @@ export function buildAskResultKeyboard(
         encodeNavigateCallbackData("document", source),
       )
       .row();
+  }
+
+  const limitsData = rateLimit
+    ? encodeLimitsCallbackData(rateLimit)
+    : undefined;
+  if (limitsData) {
+    keyboard.text("📊 Groq limits", limitsData).row();
   }
 
   keyboard.text("🏠 Home", encodeNavigateCallbackData("directory", ""));

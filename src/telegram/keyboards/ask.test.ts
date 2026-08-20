@@ -39,4 +39,17 @@ describe("buildAskResultKeyboard", () => {
       [{ text: "🏠 Home", callback_data: "d:" }],
     ]);
   });
+
+  it("adds a Groq-limits row before Home when rate-limit info is provided", () => {
+    const keyboard = buildAskResultKeyboard([], {
+      remainingRequests: 998,
+      limitRequests: 1000,
+      remainingTokens: 7908,
+      limitTokens: 8000,
+    });
+    expect(keyboard.inline_keyboard).toEqual([
+      [{ text: "📊 Groq limits", callback_data: "l:998-1000-7908-8000" }],
+      [{ text: "🏠 Home", callback_data: "d:" }],
+    ]);
+  });
 });

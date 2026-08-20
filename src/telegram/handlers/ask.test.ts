@@ -24,12 +24,17 @@ function makeDeps(
   return {
     embed: overrides.embed ?? (async () => [1, 0]),
     index: overrides.index ?? index,
-    groq: overrides.groq ?? { createChatCompletion: async () => "an answer" },
+    groq: overrides.groq ?? {
+      createChatCompletion: async () => ({
+        text: "an answer",
+        rateLimit: undefined,
+      }),
+    },
   };
 }
 
 describe("createAskHandler", () => {
-  it("shows typing, answers, and includes source buttons", async () => {
+  it("shows typing, answers as HTML, and includes source buttons", async () => {
     const { ctx, sendMessageCalls, sendTypingCalls } = createFakeBotContext({
       messageText: "what are embeddings?",
     });
@@ -39,6 +44,7 @@ describe("createAskHandler", () => {
     expect(sendTypingCalls).toHaveLength(1);
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].text).toBe("an answer");
+    expect(sendMessageCalls[0].parseMode).toBe("HTML");
     expect(sendMessageCalls[0].keyboard?.inline_keyboard).toEqual([
       [
         {
@@ -50,14 +56,40 @@ describe("createAskHandler", () => {
     ]);
   });
 
-  it("sends no keyboard when nothing cleared the relevance threshold", async () => {
+  it("still attaches a (Home-only) keyboard when nothing cleared the relevance threshold", async () => {
     const { ctx, sendMessageCalls } = createFakeBotContext({
       messageText: "something unrelated",
     });
 
     await createAskHandler(makeDeps({ embed: async () => [0.1, 0.1] }))(ctx);
 
-    expect(sendMessageCalls[0].keyboard).toBeUndefined();
+    expect(sendMessageCalls[0].keyboard?.inline_keyboard).toEqual([
+      [{ text: "🏠 Home", callback_data: "d:" }],
+    ]);
+  });
+
+  it("adds a Groq-limits button when the model call reports rate-limit info", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      messageText: "what are embeddings?",
+    });
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async () => ({
+          text: "an answer",
+          rateLimit: {
+            remainingRequests: 998,
+            limitRequests: 1000,
+            remainingTokens: 7908,
+            limitTokens: 8000,
+          },
+        }),
+      },
+    });
+
+    await createAskHandler(deps)(ctx);
+
+    const rows = sendMessageCalls[0].keyboard?.inline_keyboard;
+    expect(rows?.some((row) => row[0]?.text === "📊 Groq limits")).toBe(true);
   });
 
   it("does nothing for a blank message", async () => {
