@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   handleDeleteWebhookRequest,
   handleGetWebhookInfoRequest,
+  handleSetCommandsRequest,
   handleSetWebhookRequest,
   type WebhookApi,
 } from "./setupHandler";
@@ -39,8 +40,16 @@ function fakeApi(overrides: Partial<WebhookApi> = {}) {
         pending_update_count: 0,
       })),
   );
-  const api: WebhookApi = { setWebhook, deleteWebhook, getWebhookInfo };
-  return { api, setWebhook, deleteWebhook, getWebhookInfo };
+  const setMyCommands = vi.fn(
+    overrides.setMyCommands ?? (async () => true as const),
+  );
+  const api: WebhookApi = {
+    setWebhook,
+    deleteWebhook,
+    getWebhookInfo,
+    setMyCommands,
+  };
+  return { api, setWebhook, deleteWebhook, getWebhookInfo, setMyCommands };
 }
 
 describe("handleSetWebhookRequest", () => {
@@ -204,6 +213,61 @@ describe("handleDeleteWebhookRequest", () => {
 
     expect(response.status).toBe(401);
     expect(deleteWebhook).not.toHaveBeenCalled();
+  });
+});
+
+describe("handleSetCommandsRequest", () => {
+  it("registers BOT_COMMANDS when authorized", async () => {
+    const { api, setMyCommands } = fakeApi();
+    const request = makeRequest("PUT", { secret: SETUP_SECRET });
+
+    const response = await handleSetCommandsRequest({
+      request,
+      setupSecret: SETUP_SECRET,
+      getApi: () => api,
+    });
+
+    expect(response.status).toBe(200);
+    expect(setMyCommands).toHaveBeenCalledTimes(1);
+    const [registered] = setMyCommands.mock.calls[0];
+    expect(registered.map((c: { command: string }) => c.command)).toEqual([
+      "start",
+      "search",
+      "clear",
+    ]);
+  });
+
+  it("rejects an unauthorized request and never calls the API", async () => {
+    const { api, setMyCommands } = fakeApi();
+    const request = makeRequest("PUT", { secret: "wrong" });
+
+    const response = await handleSetCommandsRequest({
+      request,
+      setupSecret: SETUP_SECRET,
+      getApi: () => api,
+    });
+
+    expect(response.status).toBe(401);
+    expect(setMyCommands).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 without leaking details when the Telegram API call fails", async () => {
+    const { api } = fakeApi({
+      setMyCommands: async () => {
+        throw new Error("Telegram said: bad request, token abc123");
+      },
+    });
+    const request = makeRequest("PUT", { secret: SETUP_SECRET });
+
+    const response = await handleSetCommandsRequest({
+      request,
+      setupSecret: SETUP_SECRET,
+      getApi: () => api,
+    });
+
+    const body: unknown = await response.json();
+    expect(response.status).toBe(502);
+    expect(JSON.stringify(body)).not.toContain("abc123");
   });
 });
 

@@ -1,11 +1,15 @@
 import { z } from "zod";
 import { secureCompare } from "@/lib/secureCompare";
+import { BOT_COMMANDS } from "./commands";
 
 /** Only what the setup handlers actually call; a real grammY `Api` satisfies this structurally. */
 export interface WebhookApi {
   setWebhook(url: string, other?: { secret_token?: string }): Promise<true>;
   deleteWebhook(): Promise<true>;
   getWebhookInfo(): Promise<unknown>;
+  setMyCommands(
+    commands: readonly { command: string; description: string }[],
+  ): Promise<true>;
 }
 
 export interface SetupRequestOptions {
@@ -94,6 +98,28 @@ export async function handleDeleteWebhookRequest(
   }
 
   return Response.json({ ok: true });
+}
+
+/** PUT: registers BOT_COMMANDS with Telegram so they appear in the client's "/" autocomplete menu. */
+export async function handleSetCommandsRequest(
+  options: SetupRequestOptions,
+): Promise<Response> {
+  const { request, setupSecret, getApi } = options;
+  if (!isAuthorizedSetupRequest(request, setupSecret)) {
+    return Response.json({ ok: false }, { status: 401 });
+  }
+
+  try {
+    await getApi().setMyCommands(BOT_COMMANDS);
+  } catch (error) {
+    console.error(
+      "Telegram setup: setMyCommands failed",
+      error instanceof Error ? error.message : error,
+    );
+    return Response.json({ ok: false }, { status: 502 });
+  }
+
+  return Response.json({ ok: true, commands: BOT_COMMANDS });
 }
 
 /** GET: reports current webhook configuration for verification. Telegram's WebhookInfo never includes the secret token. */

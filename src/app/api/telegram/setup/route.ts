@@ -3,6 +3,7 @@ import { getBotApi } from "@/telegram/botInstance";
 import {
   handleDeleteWebhookRequest,
   handleGetWebhookInfoRequest,
+  handleSetCommandsRequest,
   handleSetWebhookRequest,
 } from "@/telegram/setupHandler";
 
@@ -23,6 +24,16 @@ export async function POST(request: Request): Promise<Response> {
 export async function DELETE(request: Request): Promise<Response> {
   const env = getEnv();
   return handleDeleteWebhookRequest({
+    request,
+    setupSecret: env.TELEGRAM_SETUP_SECRET,
+    getApi: getBotApi,
+  });
+}
+
+/** Registers the bot's "/" command menu with Telegram. Requires header X-Setup-Secret. */
+export async function PUT(request: Request): Promise<Response> {
+  const env = getEnv();
+  return handleSetCommandsRequest({
     request,
     setupSecret: env.TELEGRAM_SETUP_SECRET,
     getApi: getBotApi,
