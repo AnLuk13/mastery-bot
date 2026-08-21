@@ -1,4 +1,5 @@
 import type { ContentProvider, PrivateFolderConfig } from "@/content";
+import type { SessionStore } from "@/session";
 import type { BotContext } from "../types";
 import { renderDirectory } from "./navigation";
 
@@ -12,10 +13,11 @@ import { renderDirectory } from "./navigation";
  */
 const CLEAR_LOOKBACK_MESSAGES = 60;
 
-/** Deletes recent chat clutter (your typed questions and the bot's replies) and shows just the menu. */
+/** Deletes recent chat clutter (your typed questions and the bot's replies), wipes ambient /ask session memory, and shows just the menu. */
 export function createClearHandler(
   provider: ContentProvider,
   privateFolders: readonly PrivateFolderConfig[],
+  sessionStore: SessionStore,
 ) {
   return async (ctx: BotContext): Promise<void> => {
     if (ctx.messageId !== undefined) {
@@ -27,6 +29,9 @@ export function createClearHandler(
         fromMessageId,
         ctx.messageId - fromMessageId + 1,
       );
+    }
+    if (ctx.userId !== undefined) {
+      await sessionStore.clear(ctx.userId);
     }
     await renderDirectory(ctx, provider, "", privateFolders);
   };

@@ -1,6 +1,7 @@
 /** Test-only fakes for BotContext and ContentProvider; not imported by application code. */
 import type { InlineKeyboard } from "grammy";
 import { ContentNotFoundError, type ContentProvider } from "@/content";
+import { EMPTY_SESSION, type Session, type SessionStore } from "@/session";
 import type { BotContext, ParseMode } from "./types";
 
 export interface RecordedCall {
@@ -152,4 +153,23 @@ export function createFakeContentWriter(
   };
 
   return { writer, writes, reverts };
+}
+
+export function createFakeSessionStore(
+  initial: Record<number, Session> = {},
+): SessionStore & { sessions: Record<number, Session> } {
+  const sessions: Record<number, Session> = { ...initial };
+
+  return {
+    sessions,
+    async get(userId) {
+      return sessions[userId] ?? EMPTY_SESSION;
+    },
+    async set(userId, session) {
+      sessions[userId] = session;
+    },
+    async clear(userId) {
+      delete sessions[userId];
+    },
+  };
 }

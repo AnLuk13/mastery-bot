@@ -5,6 +5,7 @@ import {
   type Document,
   type PrivateFolderConfig,
 } from "@/content";
+import type { SessionStore } from "@/session";
 import type { CleanupHint } from "../callbackData";
 import { buildDocumentKeyboard } from "../keyboards/navigation";
 import { renderDocumentMessages } from "../formatting";
@@ -14,6 +15,7 @@ import { describeContentError } from "../userMessages";
 export function createDocumentCallbackHandler(
   provider: ContentProvider,
   privateFolders: readonly PrivateFolderConfig[],
+  sessionStore: SessionStore,
 ) {
   return async (ctx: BotContext, canonicalPath: string): Promise<void> => {
     // Acknowledge before doing any slow work (GitHub fetch, message send/edit): Telegram
@@ -35,6 +37,16 @@ export function createDocumentCallbackHandler(
         buildDocumentKeyboard(canonicalPath),
       );
       return;
+    }
+
+    // Remembered as this chat's "last viewed" document so a plain follow-up
+    // question (no reply needed) can be answered against it — see ask.ts.
+    if (ctx.userId !== undefined) {
+      const session = await sessionStore.get(ctx.userId);
+      await sessionStore.set(ctx.userId, {
+        ...session,
+        documentPath: canonicalPath,
+      });
     }
 
     const messages = renderDocumentMessages(document);

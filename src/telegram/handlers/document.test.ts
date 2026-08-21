@@ -7,6 +7,7 @@ import {
 import {
   createFakeBotContext,
   createFakeContentProvider,
+  createFakeSessionStore,
 } from "../testHelpers";
 import { createDocumentCallbackHandler } from "./document";
 
@@ -33,10 +34,11 @@ describe("createDocumentCallbackHandler", () => {
       callbackData: "f:networking-mastery/01-tcp.md",
     });
 
-    await createDocumentCallbackHandler(provider, [])(
-      ctx,
-      "networking-mastery/01-tcp.md",
-    );
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "networking-mastery/01-tcp.md");
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].text).toBe("<b>TCP</b>\n\nShort body.");
@@ -61,10 +63,11 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx } = createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider, [])(
-      ctx,
-      "networking-mastery/01-tcp.md",
-    );
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "networking-mastery/01-tcp.md");
 
     expect(requestedPath).toBe("networking-mastery/01-tcp.md");
   });
@@ -77,7 +80,11 @@ describe("createDocumentCallbackHandler", () => {
     const { ctx, updateMessageCalls, sendMessageCalls } =
       createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider, [])(ctx, "big.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "big.md");
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].keyboard).toBeUndefined();
@@ -97,7 +104,11 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, sendMessageCalls } = createFakeBotContext({ messageId: 500 });
 
-    await createDocumentCallbackHandler(provider, [])(ctx, "big.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "big.md");
 
     const lastKeyboard = sendMessageCalls.at(-1)?.keyboard;
     const backButton = lastKeyboard?.inline_keyboard[0][0];
@@ -115,10 +126,11 @@ describe("createDocumentCallbackHandler", () => {
       messageId: 500,
     });
 
-    await createDocumentCallbackHandler(provider, [])(
-      ctx,
-      "networking-mastery/01-tcp.md",
-    );
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "networking-mastery/01-tcp.md");
 
     const backButton = updateMessageCalls[0].keyboard?.inline_keyboard[0][0];
     expect(backButton).toEqual({
@@ -134,7 +146,11 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, sendMessageCalls } = createFakeBotContext(); // no messageId
 
-    await createDocumentCallbackHandler(provider, [])(ctx, "big.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "big.md");
 
     const backButton = sendMessageCalls.at(-1)?.keyboard?.inline_keyboard[0][0];
     expect(backButton).toMatchObject({
@@ -157,7 +173,11 @@ describe("createDocumentCallbackHandler", () => {
       await originalAnswer(...args);
     };
 
-    await createDocumentCallbackHandler(provider, [])(ctx, "x.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "x.md");
 
     expect(callOrder).toEqual(["answerCallbackQuery", "getDocument"]);
   });
@@ -175,7 +195,11 @@ describe("createDocumentCallbackHandler", () => {
       answerCallbackQueryCalls,
     } = createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider, [])(ctx, "missing.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "missing.md");
 
     expect(answerCallbackQueryCalls).toEqual([
       { text: undefined, showAlert: undefined },
@@ -199,7 +223,11 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, updateMessageCalls } = createFakeBotContext();
 
-    await createDocumentCallbackHandler(provider, [])(ctx, "x.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      createFakeSessionStore(),
+    )(ctx, "x.md");
 
     expect(updateMessageCalls).toHaveLength(1);
     expect(updateMessageCalls[0].text).not.toContain("GitHub is down");
@@ -215,9 +243,11 @@ describe("createDocumentCallbackHandler", () => {
     });
     const { ctx, updateMessageCalls } = createFakeBotContext({ userId: 999 });
 
-    await createDocumentCallbackHandler(provider, [
-      { folder: "ai-mastery", ownerId: 712059530 },
-    ])(ctx, "ai-mastery/01-intro.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [{ folder: "ai-mastery", ownerId: 712059530 }],
+      createFakeSessionStore(),
+    )(ctx, "ai-mastery/01-intro.md");
 
     expect(called).toBe(false);
     expect(updateMessageCalls[0].text).toBe("📄 Not found.");
@@ -231,10 +261,32 @@ describe("createDocumentCallbackHandler", () => {
       userId: 712059530,
     });
 
-    await createDocumentCallbackHandler(provider, [
-      { folder: "ai-mastery", ownerId: 712059530 },
-    ])(ctx, "ai-mastery/01-intro.md");
+    await createDocumentCallbackHandler(
+      provider,
+      [{ folder: "ai-mastery", ownerId: 712059530 }],
+      createFakeSessionStore(),
+    )(ctx, "ai-mastery/01-intro.md");
 
     expect(updateMessageCalls[0].text).not.toBe("📄 Not found.");
+  });
+
+  it("remembers the opened document as this user's last-viewed session document", async () => {
+    const provider = createFakeContentProvider({
+      getDocument: async () => makeDocument(),
+    });
+    const sessionStore = createFakeSessionStore({
+      1: { transcript: "Q: old\nA: stuff" },
+    });
+    const { ctx } = createFakeBotContext({ userId: 1 });
+
+    await createDocumentCallbackHandler(
+      provider,
+      [],
+      sessionStore,
+    )(ctx, "networking-mastery/01-tcp.md");
+
+    const session = await sessionStore.get(1);
+    expect(session.documentPath).toBe("networking-mastery/01-tcp.md");
+    expect(session.transcript).toBe("Q: old\nA: stuff");
   });
 });

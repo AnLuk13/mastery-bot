@@ -5,6 +5,7 @@ import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import {
   createFakeContentProvider,
   createFakeContentWriter,
+  createFakeSessionStore,
 } from "./testHelpers";
 import { createBot } from "./bot";
 
@@ -53,6 +54,7 @@ describe("createBot", () => {
       editors: [],
       contentWriter: createFakeContentWriter().writer,
       privateFolders: [],
+      sessionStore: createFakeSessionStore(),
       botInfo: fakeBotInfo,
     });
 

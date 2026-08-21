@@ -173,4 +173,27 @@ describe("answerQuestion", () => {
     const userMessage = deps.capturedMessages[0][1];
     expect(userMessage.content).not.toContain("Prior conversation");
   });
+
+  it("includes a reference document's content in the prompt, framed distinctly from prior conversation", async () => {
+    const deps = makeDeps();
+    await answerQuestion("summarize this", undefined, deps, "", {
+      path: "ai-mastery/05-embeddings.md",
+      content: "The full document text about embeddings.",
+    });
+
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).toContain(
+      "The full document text about embeddings.",
+    );
+    expect(userMessage.content).toContain("ai-mastery/05-embeddings.md");
+    expect(userMessage.content).not.toContain("Prior conversation");
+  });
+
+  it("omits the reference-document block when none is given", async () => {
+    const deps = makeDeps();
+    await answerQuestion("what are embeddings?", undefined, deps);
+
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).not.toContain("just viewing");
+  });
 });

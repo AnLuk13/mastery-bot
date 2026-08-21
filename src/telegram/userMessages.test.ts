@@ -5,13 +5,10 @@ import {
   appendAskTurn,
   describeAskError,
   describeSaveError,
-  extractAskTranscript,
   extractClarifyContext,
-  formatAskContextBlock,
   formatClarifyPrompt,
   formatRateLimitMessage,
   formatSaveSuccess,
-  isAskContinuation,
   isClarifyContinuation,
   truncateForAskContext,
 } from "./userMessages";
@@ -99,13 +96,10 @@ describe("describeSaveError", () => {
   });
 });
 
-describe("appendAskTurn / isAskContinuation / extractAskTranscript / formatAskContextBlock", () => {
-  it("round-trips a single turn through a formatted context block", () => {
+describe("appendAskTurn", () => {
+  it("produces a Q/A turn", () => {
     const transcript = appendAskTurn("", "what are embeddings?", "an answer");
-    const block = formatAskContextBlock(transcript);
 
-    expect(isAskContinuation(block)).toBe(true);
-    expect(extractAskTranscript(block)).toBe(transcript);
     expect(transcript).toContain("Q: what are embeddings?");
     expect(transcript).toContain("A: an answer");
   });
@@ -139,24 +133,6 @@ describe("appendAskTurn / isAskContinuation / extractAskTranscript / formatAskCo
 
     expect(transcript.length).toBeLessThan(longAnswer.length);
     expect(transcript).toContain("…");
-  });
-
-  it("returns an empty block for an empty transcript", () => {
-    expect(formatAskContextBlock("")).toBe("");
-  });
-
-  it("treats an ordinary message or no reply as not a continuation", () => {
-    expect(isAskContinuation("just a normal reply")).toBe(false);
-    expect(isAskContinuation(undefined)).toBe(false);
-  });
-
-  it("escapes HTML-significant characters from the transcript in the formatted block", () => {
-    const transcript = appendAskTurn("", "a<b>", "1 < 2 && 3 > 1");
-    const block = formatAskContextBlock(transcript);
-
-    expect(block).toContain("a&lt;b&gt;");
-    expect(block).toContain("1 &lt; 2 &amp;&amp; 3 &gt; 1");
-    expect(block).not.toContain("1 < 2 && 3 > 1");
   });
 });
 

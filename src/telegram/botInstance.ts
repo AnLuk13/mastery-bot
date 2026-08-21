@@ -1,9 +1,15 @@
+import { Redis } from "@upstash/redis";
 import type { Bot } from "grammy";
 import { createContentProvider, GitHubContentWriter } from "@/content";
 import { getEnv } from "@/lib/env";
 import { embedText } from "@/rag/embeddingModel";
 import { getEmbeddingsIndex } from "@/rag/embeddingsIndex";
 import { GroqClient } from "@/rag/groqClient";
+import {
+  NullSessionStore,
+  RedisSessionStore,
+  type SessionStore,
+} from "@/session";
 import { createBot } from "./bot";
 import type { ContentWriterLike } from "./handlers/save";
 
@@ -25,6 +31,18 @@ const DISABLED_CONTENT_WRITER: ContentWriterLike = {
  */
 let bot: Bot | undefined;
 let initPromise: Promise<void> | undefined;
+
+function createSessionStore(env: ReturnType<typeof getEnv>): SessionStore {
+  if (!env.KV_REST_API_URL || !env.KV_REST_API_TOKEN) {
+    return new NullSessionStore();
+  }
+  return new RedisSessionStore(
+    new Redis({
+      url: env.KV_REST_API_URL,
+      token: env.KV_REST_API_TOKEN,
+    }),
+  );
+}
 
 function getBot(): Bot {
   if (!bot) {
@@ -51,6 +69,7 @@ function getBot(): Bot {
       }),
       editors: env.EDITORS,
       privateFolders: env.PRIVATE_FOLDERS,
+      sessionStore: createSessionStore(env),
       // /save always writes to GitHub directly regardless of CONTENT_PROVIDER
       // (env.ts requires GITHUB_OWNER/GITHUB_REPOSITORY/GITHUB_TOKEN whenever
       // EDITORS is non-empty, so these are guaranteed present here).

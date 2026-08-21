@@ -124,6 +124,12 @@ const baseSchema = z.object({
   GROQ_ASK_MODEL: z.string().min(1).default("groq/compound-mini"),
   EDITORS: editorsSchema,
   PRIVATE_FOLDERS: privateFoldersSchema,
+  // Both optional: ambient /ask session memory (see src/session) is simply
+  // off — falls back to a no-op store — when these aren't configured. Names
+  // match what Vercel's "Upstash for Redis" marketplace integration actually
+  // injects (KV_REST_API_*), not Upstash's own UPSTASH_REDIS_REST_* naming.
+  KV_REST_API_URL: z.string().optional(),
+  KV_REST_API_TOKEN: z.string().optional(),
 });
 
 const envSchema = baseSchema.superRefine((value, ctx) => {
@@ -176,6 +182,15 @@ const envSchema = baseSchema.superRefine((value, ctx) => {
         message: "is required (with write permission) when EDITORS is set",
       });
     }
+  }
+
+  if (Boolean(value.KV_REST_API_URL) !== Boolean(value.KV_REST_API_TOKEN)) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["KV_REST_API_URL"],
+      message:
+        "KV_REST_API_URL and KV_REST_API_TOKEN must be set together, or not at all",
+    });
   }
 });
 

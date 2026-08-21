@@ -3,6 +3,7 @@ import type { ContentProvider, PrivateFolderConfig } from "@/content";
 import type { EditorConfig } from "@/lib/env";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import type { GroqClient } from "@/rag/groqClient";
+import type { SessionStore } from "@/session";
 import { adaptContext } from "./adapter";
 import { enforceAuthorization } from "./auth";
 import { decodeCallbackData } from "./callbackData";
@@ -38,6 +39,8 @@ export interface CreateBotOptions {
   /** /save's model client — deliberately separate from askDeps.groq: /ask and /save use different Groq models with different capabilities. */
   saveGroq: Pick<GroqClient, "createChatCompletion">;
   privateFolders: readonly PrivateFolderConfig[];
+  /** Ambient /ask conversation memory — see src/session. */
+  sessionStore: SessionStore;
   /** Pass to skip grammY's getMe network call, e.g. in tests. */
   botInfo?: BotConfig<Context>["botInfo"];
 }
@@ -52,7 +55,8 @@ export function createBot(options: CreateBotOptions): Bot {
     options.token,
     options.botInfo ? { botInfo: options.botInfo } : undefined,
   );
-  const { contentProvider, allowedUserIds, privateFolders } = options;
+  const { contentProvider, allowedUserIds, privateFolders, sessionStore } =
+    options;
 
   bot.use(async (grammyCtx, next) => {
     const ctx = adaptContext(grammyCtx);
@@ -78,6 +82,7 @@ export function createBot(options: CreateBotOptions): Bot {
     await createClearHandler(
       contentProvider,
       privateFolders,
+      sessionStore,
     )(adaptContext(grammyCtx));
   });
 
@@ -98,7 +103,11 @@ export function createBot(options: CreateBotOptions): Bot {
     await saveHandler(adaptContext(grammyCtx));
   });
 
-  const askHandler = createAskHandler(options.askDeps);
+  const askHandler = createAskHandler(
+    options.askDeps,
+    contentProvider,
+    sessionStore,
+  );
   bot.on("message:text", async (grammyCtx) => {
     const ctx = adaptContext(grammyCtx);
     const text = grammyCtx.message.text;
@@ -138,10 +147,11 @@ export function createBot(options: CreateBotOptions): Bot {
         );
         break;
       case "document":
-        await createDocumentCallbackHandler(contentProvider, privateFolders)(
-          ctx,
-          decoded.path,
-        );
+        await createDocumentCallbackHandler(
+          contentProvider,
+          privateFolders,
+          sessionStore,
+        )(ctx, decoded.path);
         break;
       case "search-help":
         await handleSearchHelpCallback(ctx);

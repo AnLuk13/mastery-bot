@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createFakeBotContext,
   createFakeContentProvider,
+  createFakeSessionStore,
 } from "../testHelpers";
 import { createClearHandler } from "./clear";
 
@@ -15,7 +16,7 @@ describe("createClearHandler", () => {
       listDirectory: async () => [],
     });
 
-    await createClearHandler(provider, [])(ctx);
+    await createClearHandler(provider, [], createFakeSessionStore())(ctx);
 
     expect(deleteMessagesCalls).toHaveLength(1);
     expect(deleteMessagesCalls[0]).toEqual({ fromMessageId: 5041, count: 60 });
@@ -28,7 +29,7 @@ describe("createClearHandler", () => {
     });
     const provider = createFakeContentProvider();
 
-    await createClearHandler(provider, [])(ctx);
+    await createClearHandler(provider, [], createFakeSessionStore())(ctx);
 
     expect(deleteMessagesCalls[0]).toEqual({ fromMessageId: 1, count: 10 });
   });
@@ -38,9 +39,21 @@ describe("createClearHandler", () => {
       createFakeBotContext();
     const provider = createFakeContentProvider();
 
-    await createClearHandler(provider, [])(ctx);
+    await createClearHandler(provider, [], createFakeSessionStore())(ctx);
 
     expect(deleteMessagesCalls).toHaveLength(0);
     expect(updateMessageCalls).toHaveLength(1);
+  });
+
+  it("wipes the caller's ambient session memory", async () => {
+    const { ctx } = createFakeBotContext({ userId: 1, messageId: 5100 });
+    const provider = createFakeContentProvider();
+    const sessionStore = createFakeSessionStore({
+      1: { transcript: "Q: old\nA: stuff", documentPath: "a.md" },
+    });
+
+    await createClearHandler(provider, [], sessionStore)(ctx);
+
+    expect(await sessionStore.get(1)).toEqual({ transcript: "" });
   });
 });

@@ -49,11 +49,17 @@ function buildContextBlock(
     .join("\n\n---\n\n");
 }
 
+export interface ReferenceDocument {
+  path: string;
+  content: string;
+}
+
 export async function answerQuestion(
   question: string,
   userId: number | undefined,
   deps: AnswerQuestionDeps,
   priorTranscript = "",
+  referenceDocument?: ReferenceDocument,
 ): Promise<Answer> {
   // A pronoun-heavy follow-up ("summarize that") carries little retrievable
   // meaning on its own — embedding it together with the prior turns gets
@@ -65,6 +71,13 @@ export async function answerQuestion(
     (chunk) => isPathVisible(chunk.path, userId, deps.privateFolders),
   );
 
+  // Distinct from the retrieved-notes context below: this is the document the
+  // user was just browsing (their ambient "last viewed" session state, not a
+  // relevance-scored search hit), so it's framed as something that may or may
+  // not bear on the current question rather than as ground truth to cite.
+  const documentBlock = referenceDocument
+    ? `The user was just viewing this document (it may or may not be relevant to their question) — ${referenceDocument.path}:\n${referenceDocument.content}\n\n`
+    : "";
   const conversationBlock = priorTranscript
     ? `Prior conversation in this thread:\n${priorTranscript}\n\n`
     : "";
@@ -72,7 +85,7 @@ export async function answerQuestion(
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `${conversationBlock}Retrieved notes:\n\n${buildContextBlock(retrieved)}\n\nQuestion: ${question}`,
+      content: `${documentBlock}${conversationBlock}Retrieved notes:\n\n${buildContextBlock(retrieved)}\n\nQuestion: ${question}`,
     },
   ];
 
