@@ -8,6 +8,16 @@
 export interface Session {
   transcript: string;
   documentPath?: string;
+  /**
+   * The full text of a /save request currently awaiting a clarifying
+   * answer — set when decideSave() asks a question, read back when the
+   * user replies. Exists specifically so a large uploaded file's content
+   * survives the round-trip uncapped: the clarify prompt message ALSO
+   * echoes a truncated copy (see SAVE_CONTEXT_MARKER in userMessages.ts)
+   * as a fallback for when session storage isn't configured, but that
+   * echo is capped well under Telegram's message limit and this isn't.
+   */
+  pendingSaveRequest?: string;
 }
 
 export const EMPTY_SESSION: Session = { transcript: "" };

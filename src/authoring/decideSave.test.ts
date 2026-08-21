@@ -163,7 +163,7 @@ describe("decideSave reorganize", () => {
     });
   });
 
-  it("degrades a reorganize decision into a plain write on round 2, instead of proposing a second confirmation step", async () => {
+  it("still accepts a reorganize decision on round 2 (execution timing, not validation, differs there — see save.ts)", async () => {
     const groq = fakeGroq({
       action: "reorganize",
       moveFrom: "andreea/meeting.md",
@@ -174,9 +174,10 @@ describe("decideSave reorganize", () => {
     });
     const decision = await decideSave({ ...flatCtx, clarifyRound: 1 }, groq);
     expect(decision).toEqual({
-      action: "write",
-      path: "andreea/meetings/sales-call.md",
-      isNewFile: true,
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/meetings/kickoff.md",
+      newPath: "andreea/meetings/sales-call.md",
       content: "# Sales call\nTomorrow at 3pm.",
       commitMessage: "save: sales call note",
     });

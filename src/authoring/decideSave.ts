@@ -18,7 +18,7 @@ type GroqLike = Pick<GroqClient, "createChatCompletion">;
 function decideSystemPrompt(ctx: SaveRequestContext): string {
   const roundNote =
     ctx.clarifyRound > 0
-      ? 'This is the second attempt: you already asked a clarifying question and the user answered it. You MUST return "write" this time — never "clarify" again, and never "reorganize" either, even if the answer mentions restructuring or grouping notes together. The user has already been through one extra round; a "reorganize" decision means yet another confirmation step, which defeats the point. If restructuring genuinely seems warranted, just write the new note into the best topic subfolder you can — do not propose moving anything.'
+      ? 'This is the second attempt: you already asked a clarifying question and the user answered it. You MUST return "write" or "reorganize" this time — never "clarify" again, the user has already given you what you asked for. If grouping this with an existing flat file genuinely makes sense, "reorganize" is the right call here too — on this attempt it applies directly without asking again, since the user already gave their input for this round.'
       : "This is the first attempt.";
 
   return `You help maintain a personal Markdown knowledge base for one editor, stored under the folder "${ctx.editorFolder}/". You'll be given a save request (a typed note, or a description alongside uploaded file content) and a list of that editor's existing document paths.
@@ -29,7 +29,7 @@ Decide one of:
    - Otherwise, respond with action "write", a NEW path, isNewFile: true, and the full Markdown content directly. Keep it concise — this is a saved note, not a textbook chapter: a "# Title" line plus a few sentences or bullets is often enough.
    - New-file paths MUST use a topic subfolder: "${ctx.editorFolder}/<topic>/<file>.md", never a file directly under "${ctx.editorFolder}/" itself. Pick <topic> from the request's actual subject (e.g. a work meeting note might be "${ctx.editorFolder}/meetings/...", a networking note "${ctx.editorFolder}/networking/..."). If existing documents already establish a topic structure, follow it and reuse a matching topic folder over inventing a near-duplicate one; if there are none yet, choose a sensible topic name yourself — a knowledge base organized by subject is the whole point, so never take the shortcut of skipping the subfolder just because nothing exists yet.
    - Every path must start with "${ctx.editorFolder}/", include at least one subfolder, and end in .md.
-2. If the request is for a genuinely NEW, separate note, and its topic clearly overlaps with an EXISTING file that sits directly under "${ctx.editorFolder}/" with NO topic subfolder of its own (i.e. it predates any folder organization), you may instead propose grouping them: respond with action "reorganize", moveFrom (that exact existing flat path), moveTo (a new path for it inside a shared topic subfolder), newPath (a path for the NEW note inside that same subfolder), the new note's full Markdown content, and a commitMessage for the new note. This only ever proposes the move — it is not executed until the user confirms. Use it sparingly and only when the two are clearly the same subject; never for a file that's already inside a subfolder, and never when the request is actually just editing that existing file itself (that's still action "write" with isNewFile: false, per #1).
+2. If the request is for a genuinely NEW, separate note, and its topic clearly overlaps with an EXISTING file that sits directly under "${ctx.editorFolder}/" with NO topic subfolder of its own (i.e. it predates any folder organization), you may instead propose grouping them: respond with action "reorganize", moveFrom (that exact existing flat path), moveTo (a new path for it inside a shared topic subfolder), newPath (a path for the NEW note inside that same subfolder), the new note's full Markdown content, and a commitMessage for the new note. On a first attempt this only proposes the move, shown to the user to confirm before anything happens; on a second attempt (see below) it applies directly. Use it sparingly and only when the two are clearly the same subject; never for a file that's already inside a subfolder, and never when the request is actually just editing that existing file itself (that's still action "write" with isNewFile: false, per #1).
 3. If you genuinely can't tell where this belongs, respond with action "clarify" and 1-3 short, specific questions.
 
 ${roundNote}
@@ -192,27 +192,6 @@ export async function decideSave(
       "Groq returned an unexpected save-decision shape",
     );
   }
-  // Round 2 must be decisive — the prompt already instructs this (see
-  // decideSystemPrompt's roundNote), this is the code-level backstop for
-  // when the model doesn't comply. A "reorganize" decision here would mean
-  // the user answers one clarifying round only to be hit with a SECOND
-  // confirmation step (reorganize always asks first) right when they
-  // expect the save to just happen — so it's degraded into a plain write
-  // of the new note instead, silently dropping the move proposal, rather
-  // than surfacing yet another round.
-  if (ctx.clarifyRound > 0 && parsed.data.action === "reorganize") {
-    return validateWriteDecision(
-      {
-        action: "write",
-        path: parsed.data.newPath,
-        isNewFile: true,
-        content: parsed.data.content,
-        commitMessage: parsed.data.commitMessage,
-      },
-      ctx,
-    );
-  }
-
   if (parsed.data.action === "clarify") return parsed.data;
   if (parsed.data.action === "reorganize") {
     return validateReorganizeDecision(parsed.data, ctx);

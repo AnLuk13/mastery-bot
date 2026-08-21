@@ -3,6 +3,7 @@ import { ContentNotFoundError } from "@/content";
 import type { EditorConfig } from "@/lib/env";
 import type { GroqClient } from "@/rag/groqClient";
 import { composeUpdate, decideSave } from "@/authoring/decideSave";
+import type { SessionStore } from "@/session";
 import type { RevertTarget } from "../callbackData";
 import { findEditorFolder } from "../auth";
 import {
@@ -24,6 +25,7 @@ import {
   isClarifyContinuation,
   SAVE_USAGE_MESSAGE,
   UNSUPPORTED_SAVE_FILE_MESSAGE,
+  type ReorganizeProposal,
 } from "../userMessages";
 
 function basename(path: string): string {
@@ -49,6 +51,7 @@ export interface SaveDeps {
   contentProvider: ContentProvider;
   contentWriter: ContentWriterLike;
   groq: Pick<GroqClient, "createChatCompletion">;
+  sessionStore: SessionStore;
 }
 
 const MAX_LISTED_ENTRIES = 300;
@@ -105,6 +108,58 @@ async function writeAndReport(
   await ctx.sendMessage(formatSaveSuccess(result.path, content), keyboard);
 }
 
+/**
+ * Actually performs a reorganize: writes the new note, copies the existing
+ * flat file's current content to its new topic-folder home, then deletes
+ * the old path — each as its own commit, each independently revertible.
+ * Shared by the confirm-button flow (see createReorganizeConfirmHandler)
+ * and the round-2 direct-execution path in performSave below.
+ */
+async function executeReorganize(
+  ctx: BotContext,
+  deps: SaveDeps,
+  proposal: ReorganizeProposal,
+): Promise<void> {
+  const newResult = await deps.contentWriter.write(
+    proposal.newPath,
+    proposal.content,
+    proposal.commitMessage,
+  );
+  const existingDoc = await deps.contentProvider.getDocument(proposal.moveFrom);
+  const moveMessage = `reorganize: move ${proposal.moveFrom} to ${proposal.moveTo}`;
+  const moveResult = await deps.contentWriter.write(
+    proposal.moveTo,
+    existingDoc.content,
+    moveMessage,
+  );
+  const deleteResult = await deps.contentWriter.delete(
+    proposal.moveFrom,
+    moveMessage,
+  );
+
+  const keyboard = buildReorganizeResultKeyboard([
+    {
+      label: basename(newResult.path),
+      path: newResult.path,
+      beforeCommitSha: newResult.beforeCommitSha,
+      viewable: true,
+    },
+    {
+      label: basename(moveResult.path),
+      path: moveResult.path,
+      beforeCommitSha: moveResult.beforeCommitSha,
+      viewable: true,
+    },
+    {
+      label: `restore ${basename(deleteResult.path)}`,
+      path: deleteResult.path,
+      beforeCommitSha: deleteResult.beforeCommitSha,
+      viewable: false,
+    },
+  ]);
+  await ctx.sendMessage(formatReorganizeSuccess(proposal), keyboard);
+}
+
 /** Shared core of every save path: decide where the request belongs, merge or write it, and report the result. Never throws — errors are reported to the user as a safe message. */
 async function performSave(
   ctx: BotContext,
@@ -126,13 +181,33 @@ async function performSave(
     );
 
     if (decision.action === "clarify") {
+      // Stored server-side so a large uploaded file's content survives the
+      // round-trip uncapped — see Session.pendingSaveRequest. The message
+      // itself still echoes a truncated copy too, as a fallback for when
+      // session storage isn't configured.
+      if (ctx.userId !== undefined) {
+        const session = await deps.sessionStore.get(ctx.userId);
+        await deps.sessionStore.set(ctx.userId, {
+          ...session,
+          pendingSaveRequest: request,
+        });
+      }
       await ctx.sendMessage(formatClarifyPrompt(decision.questions, request));
       return;
     }
 
     if (decision.action === "reorganize") {
-      // Ask first — this only ever proposes the move; nothing writes or
-      // moves until the user taps Yes (see createReorganizeConfirmHandler).
+      if (clarifyRound > 0) {
+        // The user already answered one clarifying round — that reply IS
+        // their go-ahead. Asking again with Yes/No here would be a second
+        // confirmation step right when the save should just happen, so
+        // this executes directly instead of proposing.
+        await executeReorganize(ctx, deps, decision);
+        return;
+      }
+      // First attempt: ask first — this only ever proposes the move;
+      // nothing writes or moves until the user taps Yes (see
+      // createReorganizeConfirmHandler).
       await ctx.sendMessage(
         formatReorganizePrompt(decision),
         buildReorganizeConfirmKeyboard(),
@@ -191,7 +266,15 @@ export function createSaveHandler(deps: SaveDeps) {
       request = `Uploaded file "${ctx.document.fileName}":\n${fileContent}`;
       clarifyRound = 0;
     } else if (isClarifyContinuation(ctx.replyToMessageText)) {
-      const original = extractClarifyContext(ctx.replyToMessageText ?? "");
+      // Prefer the full, uncapped original stored server-side (see
+      // Session.pendingSaveRequest) — falls back to the message's own
+      // (truncated) echo only if session storage isn't configured.
+      const stored =
+        ctx.userId !== undefined
+          ? (await deps.sessionStore.get(ctx.userId)).pendingSaveRequest
+          : undefined;
+      const original =
+        stored ?? extractClarifyContext(ctx.replyToMessageText ?? "");
       const answer = (ctx.messageText ?? "").trim();
       request = `${original}\n\nAdditional info from the user:\n${answer}`;
       clarifyRound = 1;
@@ -300,46 +383,7 @@ export function createReorganizeConfirmHandler(deps: SaveDeps) {
         return;
       }
 
-      const newResult = await deps.contentWriter.write(
-        proposal.newPath,
-        proposal.content,
-        proposal.commitMessage,
-      );
-      const existingDoc = await deps.contentProvider.getDocument(
-        proposal.moveFrom,
-      );
-      const moveMessage = `reorganize: move ${proposal.moveFrom} to ${proposal.moveTo}`;
-      const moveResult = await deps.contentWriter.write(
-        proposal.moveTo,
-        existingDoc.content,
-        moveMessage,
-      );
-      const deleteResult = await deps.contentWriter.delete(
-        proposal.moveFrom,
-        moveMessage,
-      );
-
-      const keyboard = buildReorganizeResultKeyboard([
-        {
-          label: basename(newResult.path),
-          path: newResult.path,
-          beforeCommitSha: newResult.beforeCommitSha,
-          viewable: true,
-        },
-        {
-          label: basename(moveResult.path),
-          path: moveResult.path,
-          beforeCommitSha: moveResult.beforeCommitSha,
-          viewable: true,
-        },
-        {
-          label: `restore ${basename(deleteResult.path)}`,
-          path: deleteResult.path,
-          beforeCommitSha: deleteResult.beforeCommitSha,
-          viewable: false,
-        },
-      ]);
-      await ctx.sendMessage(formatReorganizeSuccess(proposal), keyboard);
+      await executeReorganize(ctx, deps, proposal);
     } catch (error) {
       await ctx.sendMessage(describeSaveError(error));
     }

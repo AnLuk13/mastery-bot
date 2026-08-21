@@ -5,6 +5,7 @@ import {
   createFakeBotContext,
   createFakeContentProvider,
   createFakeContentWriter,
+  createFakeSessionStore,
 } from "../testHelpers";
 import {
   createReorganizeConfirmHandler,
@@ -41,6 +42,7 @@ function baseDeps(overrides: Partial<SaveDeps> = {}): SaveDeps {
         content: "# Keepalive\nCheck TCP keepalive on the LB.",
         commitMessage: "save: keepalive note",
       }),
+    sessionStore: overrides.sessionStore ?? createFakeSessionStore(),
   };
 }
 
@@ -150,6 +152,58 @@ describe("createSaveHandler", () => {
       "Which topic should this go under?",
     );
     expect(sendMessageCalls[0].text).toContain("something vague");
+  });
+
+  it("stores the full request server-side when asking a clarifying question", async () => {
+    const groq = fakeGroqReturning({
+      action: "clarify",
+      questions: ["Which topic?"],
+    });
+    const sessionStore = createFakeSessionStore();
+    const { ctx } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "something vague",
+    });
+
+    await createSaveHandler(baseDeps({ groq, sessionStore }))(ctx);
+
+    expect((await sessionStore.get(712059530)).pendingSaveRequest).toBe(
+      "something vague",
+    );
+  });
+
+  it("uses the full server-stored request on round 2, not just the (possibly truncated) message echo", async () => {
+    const capturedMessages: unknown[] = [];
+    const longOriginalRequest = `Uploaded file "big.md":\n${"x".repeat(5000)}`;
+    const groq = {
+      createChatCompletion: async (messages: unknown) => {
+        capturedMessages.push(messages);
+        return {
+          text: JSON.stringify({
+            action: "write",
+            path: "antonio/networking/keepalive.md",
+            isNewFile: true,
+            content: "# Keepalive",
+            commitMessage: "save",
+          }),
+          rateLimit: undefined,
+        };
+      },
+    };
+    const sessionStore = createFakeSessionStore({
+      712059530: { transcript: "", pendingSaveRequest: longOriginalRequest },
+    });
+    const { ctx } = createFakeBotContext({
+      userId: 712059530,
+      messageText: "networking",
+      replyToMessageText:
+        "❓ Need a bit more info to save this:\n1. Which topic?\n\n⎯⎯⎯ save-context (do not edit) ⎯⎯⎯\n(truncated echo, much shorter than the real file)",
+    });
+
+    await createSaveHandler(baseDeps({ groq, sessionStore }))(ctx);
+
+    const prompt = JSON.stringify(capturedMessages);
+    expect(prompt).toContain("x".repeat(5000));
   });
 
   it("rejects an unsupported uploaded file type", async () => {
@@ -365,6 +419,47 @@ describe("createSaveHandler reorganize proposal", () => {
     expect(deletes).toHaveLength(0);
     expect(sendMessageCalls[0].text).toContain("antonio/meeting.md");
     expect(sendMessageCalls[0].keyboard?.inline_keyboard.flat()).toContainEqual(
+      expect.objectContaining({ text: "✅ Yes, reorganize" }),
+    );
+  });
+
+  it("executes a reorganize directly on round 2 (after a clarifying answer), with no extra confirmation step", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const contentProvider = contentProviderWithFlatMeeting({
+      getDocument: async () => ({
+        path: "antonio/meeting.md",
+        name: "meeting.md",
+        content: "# Meeting\nOriginal notes.",
+      }),
+    });
+    const groq = fakeGroqReturning({
+      action: "reorganize",
+      moveFrom: "antonio/meeting.md",
+      moveTo: "antonio/meetings/kickoff.md",
+      newPath: "antonio/meetings/sales-call.md",
+      content: "# Sales call\nTomorrow at 3pm.",
+      commitMessage: "save: sales call",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      messageText: "decide yourself",
+      replyToMessageText:
+        "❓ Need a bit more info to save this:\n1. Which topic?\n\n⎯⎯⎯ save-context (do not edit) ⎯⎯⎯\nsomething about a sales call",
+    });
+
+    await createSaveHandler(
+      baseDeps({ contentWriter: writer, contentProvider, groq }),
+    )(ctx);
+
+    expect(writes.map((w) => w.path)).toEqual([
+      "antonio/meetings/sales-call.md",
+      "antonio/meetings/kickoff.md",
+    ]);
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].path).toBe("antonio/meeting.md");
+    expect(
+      sendMessageCalls[0].keyboard?.inline_keyboard.flat(),
+    ).not.toContainEqual(
       expect.objectContaining({ text: "✅ Yes, reorganize" }),
     );
   });

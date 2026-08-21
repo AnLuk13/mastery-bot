@@ -93,6 +93,7 @@ export function createBot(options: CreateBotOptions): Bot {
     contentProvider,
     contentWriter: options.contentWriter,
     groq: options.saveGroq,
+    sessionStore,
   };
   const saveHandler = createSaveHandler(saveDeps);
   const saveFromMessageHandler = createSaveFromMessageHandler(saveDeps);
