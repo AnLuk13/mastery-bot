@@ -1,0 +1,72 @@
+name: Reindex embeddings and deploy
+
+# Keeps /ask's embeddings index (src/rag/data/embeddingsIndex.json) in sync
+# with the mastery content repo automatically. See
+# antonio/mastery-bot/04-rag-ask.md in that repo for why the index is
+# precomputed and committed rather than built live: embedding the whole
+# knowledge base on every chat request would be slow and wasteful, so this
+# runs on a schedule instead — no code change needed to pick up new/edited
+# notes, just a bounded delay.
+on:
+  schedule:
+    # Every 30 minutes. Adjust freely — a personal, low-volume knowledge
+    # base doesn't need faster than this, and a no-op run (nothing changed)
+    # costs almost nothing.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {} # manual "run now" from the Actions tab
+
+permissions:
+  contents: write # to commit+push the rebuilt index back to this repo
+
+jobs:
+  reindex:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout mastery-bot
+        uses: actions/checkout@v4
+
+      - name: Checkout mastery content repo
+        uses: actions/checkout@v4
+        with:
+          repository: AnLuk13/mastery
+          # Read-only PAT scoped to just the mastery repo (Contents: read).
+          # Add it as a repo secret named CONTENT_REPO_TOKEN before enabling
+          # this workflow — see antonio/mastery-bot/04-rag-ask.md.
+          token: ${{ secrets.CONTENT_REPO_TOKEN }}
+          path: mastery-content
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild the embeddings index
+        env:
+          CONTENT_ROOT: ${{ github.workspace }}/mastery-content
+        run: npx tsx scripts/buildEmbeddingsIndex.ts
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet -- src/rag/data/embeddingsIndex.json; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push the updated index
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/rag/data/embeddingsIndex.json
+          git commit -m "Rebuild embeddings index (automated)"
+          git push
+
+      - name: Trigger a Vercel production deploy
+        if: steps.diff.outputs.changed == 'true'
+        run: curl -fsS -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
