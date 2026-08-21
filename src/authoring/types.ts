@@ -48,10 +48,25 @@ const reorganizeSchema = z.object({
   commitMessage: z.string().min(1),
 });
 
+// Removes one or more existing documents — a single file, or every document
+// under a folder the request named. Never executed directly by decideSave()
+// itself: a single path is deleted immediately by the caller (same
+// immediate-commit-plus-revert pattern as every other save action), but 2+
+// paths at once are shown to the user for confirmation first, since several
+// files vanishing in one request is a bigger blast radius than any other
+// single save action produces.
+const deleteSchema = z.object({
+  action: z.literal("delete"),
+  /** Exact existing document paths to remove — for a folder, every existing document under it. */
+  paths: z.array(z.string().min(1)).min(1),
+  commitMessage: z.string().min(1),
+});
+
 const decisionSchema = z.discriminatedUnion("action", [
   clarifySchema,
   writeSchema,
   reorganizeSchema,
+  deleteSchema,
 ]);
 
 export type SaveDecision = z.infer<typeof decisionSchema>;

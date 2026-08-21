@@ -7,6 +7,8 @@ import type { SessionStore } from "@/session";
 import type { RevertTarget } from "../callbackData";
 import { findEditorFolder } from "../auth";
 import {
+  buildDeleteConfirmKeyboard,
+  buildDeleteResultKeyboard,
   buildReorganizeConfirmKeyboard,
   buildReorganizeResultKeyboard,
   buildSaveResultKeyboard,
@@ -16,8 +18,11 @@ import {
   ACCESS_DENIED_MESSAGE,
   describeSaveError,
   extractClarifyContext,
+  extractDeleteProposal,
   extractReorganizeProposal,
   formatClarifyPrompt,
+  formatDeleteConfirmPrompt,
+  formatDeleteSuccess,
   formatReorganizePrompt,
   formatReorganizeSuccess,
   formatRevertSuccess,
@@ -25,6 +30,7 @@ import {
   isClarifyContinuation,
   SAVE_USAGE_MESSAGE,
   UNSUPPORTED_SAVE_FILE_MESSAGE,
+  type DeleteProposal,
   type ReorganizeProposal,
 } from "../userMessages";
 
@@ -160,6 +166,37 @@ async function executeReorganize(
   await ctx.sendMessage(formatReorganizeSuccess(proposal), keyboard);
 }
 
+/**
+ * Actually performs a delete: removes every path in the proposal, each as
+ * its own commit, each independently revertible (revert() recreates a
+ * deleted file exactly like it undoes any other write — see
+ * GitHubContentWriter). Shared by the confirm-button flow (see
+ * createDeleteConfirmHandler) and the immediate-execution paths in
+ * performSave below (a single file, or 2+ files on round 2+).
+ */
+async function executeDelete(
+  ctx: BotContext,
+  deps: SaveDeps,
+  proposal: DeleteProposal,
+): Promise<void> {
+  const results = [];
+  for (const path of proposal.paths) {
+    results.push(await deps.contentWriter.delete(path, proposal.commitMessage));
+  }
+
+  const keyboard = buildDeleteResultKeyboard(
+    results.map((result) => ({
+      label: basename(result.path),
+      path: result.path,
+      beforeCommitSha: result.beforeCommitSha,
+    })),
+  );
+  await ctx.sendMessage(
+    formatDeleteSuccess(results.map((result) => result.path)),
+    keyboard,
+  );
+}
+
 /** Shared core of every save path: decide where the request belongs, merge or write it, and report the result. Never throws — errors are reported to the user as a safe message. */
 async function performSave(
   ctx: BotContext,
@@ -212,6 +249,24 @@ async function performSave(
         formatReorganizePrompt(decision),
         buildReorganizeConfirmKeyboard(),
       );
+      return;
+    }
+
+    if (decision.action === "delete") {
+      if (decision.paths.length > 1 && clarifyRound === 0) {
+        // Several files vanishing in one request is a bigger blast radius
+        // than any other single save action produces — ask first, same
+        // reasoning as reorganize's first-attempt confirmation.
+        await ctx.sendMessage(
+          formatDeleteConfirmPrompt(decision),
+          buildDeleteConfirmKeyboard(),
+        );
+        return;
+      }
+      // A single file deletes immediately, same as any other save action —
+      // and 2+ files on round 2 execute directly too, since the user's
+      // answer to the clarifying question already is their go-ahead.
+      await executeDelete(ctx, deps, decision);
       return;
     }
 
@@ -384,6 +439,51 @@ export function createReorganizeConfirmHandler(deps: SaveDeps) {
       }
 
       await executeReorganize(ctx, deps, proposal);
+    } catch (error) {
+      await ctx.sendMessage(describeSaveError(error));
+    }
+  };
+}
+
+/**
+ * Handles a tap on a multi-file delete proposal's Yes/No buttons (see
+ * userMessages.ts's formatDeleteConfirmPrompt). Confirming removes every
+ * proposed path; declining leaves everything untouched. Every path is
+ * re-validated against the CALLER's own folder here regardless of what the
+ * echoed proposal claims — that text round-tripped through a Telegram
+ * message and is untrusted input, same as callback_data.
+ */
+export function createDeleteConfirmHandler(deps: SaveDeps) {
+  return async (ctx: BotContext, confirmed: boolean): Promise<void> => {
+    await ctx.answerCallbackQuery();
+
+    const folder = findEditorFolder(ctx.userId, deps.editors);
+    if (folder === undefined) {
+      await ctx.sendMessage(ACCESS_DENIED_MESSAGE);
+      return;
+    }
+
+    const proposal = ctx.callbackMessageText
+      ? extractDeleteProposal(ctx.callbackMessageText)
+      : undefined;
+    if (!proposal) {
+      await ctx.sendMessage(
+        "⚠️ That proposal is no longer available — please /save again.",
+      );
+      return;
+    }
+    if (!proposal.paths.every((path) => path.startsWith(`${folder}/`))) {
+      await ctx.sendMessage(ACCESS_DENIED_MESSAGE);
+      return;
+    }
+
+    if (!confirmed) {
+      await ctx.sendMessage("❌ Cancelled — nothing was deleted.");
+      return;
+    }
+
+    try {
+      await executeDelete(ctx, deps, proposal);
     } catch (error) {
       await ctx.sendMessage(describeSaveError(error));
     }

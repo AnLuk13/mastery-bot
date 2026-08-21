@@ -219,6 +219,45 @@ export function extractReorganizeProposal(
   }
 }
 
+const DELETE_MARKER = "⎯⎯⎯ delete-proposal (do not edit) ⎯⎯⎯";
+
+const deleteProposalSchema = z.object({
+  paths: z.array(z.string().min(1)).min(1),
+  commitMessage: z.string().min(1),
+});
+
+export type DeleteProposal = z.infer<typeof deleteProposalSchema>;
+
+/** The ask-first confirmation prompt for deleting 2+ files at once — same no-server-state marker trick as formatReorganizePrompt. */
+export function formatDeleteConfirmPrompt(proposal: DeleteProposal): string {
+  const list = proposal.paths.map((path) => `• ${path}`).join("\n");
+  return `🗑️ Delete ${proposal.paths.length} files?\n\n${list}\n\n${DELETE_MARKER}\n${JSON.stringify(proposal)}`;
+}
+
+/** True when `callbackMessageText` is one of our own delete proposals. */
+export function isDeleteProposal(
+  callbackMessageText: string | undefined,
+): boolean {
+  return (
+    callbackMessageText !== undefined &&
+    callbackMessageText.includes(DELETE_MARKER)
+  );
+}
+
+/** Recovers the pending proposal from the confirm/decline message's own text. Returns undefined if missing or malformed — e.g. the message predates this feature. */
+export function extractDeleteProposal(
+  callbackMessageText: string,
+): DeleteProposal | undefined {
+  const index = callbackMessageText.indexOf(DELETE_MARKER);
+  if (index === -1) return undefined;
+  const raw = callbackMessageText.slice(index + DELETE_MARKER.length).trim();
+  try {
+    return deleteProposalSchema.parse(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
 export function formatSaveSuccess(path: string, content: string): string {
   const preview = content.length > 300 ? `${content.slice(0, 300)}…` : content;
   return `✅ Saved to ${path}\n\n${preview}`;
@@ -230,6 +269,12 @@ export function formatReorganizeSuccess(proposal: ReorganizeProposal): string {
       ? `${proposal.content.slice(0, 300)}…`
       : proposal.content;
   return `✅ Saved to ${proposal.newPath}, and moved ${proposal.moveFrom} to ${proposal.moveTo}.\n\n${preview}`;
+}
+
+export function formatDeleteSuccess(paths: readonly string[]): string {
+  if (paths.length === 1) return `🗑️ Deleted ${paths[0]}.`;
+  const list = paths.map((path) => `• ${path}`).join("\n");
+  return `🗑️ Deleted ${paths.length} files:\n\n${list}`;
 }
 
 export function formatRevertSuccess(path: string): string {

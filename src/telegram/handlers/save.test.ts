@@ -8,6 +8,7 @@ import {
   createFakeSessionStore,
 } from "../testHelpers";
 import {
+  createDeleteConfirmHandler,
   createReorganizeConfirmHandler,
   createRevertHandler,
   createSaveFromMessageHandler,
@@ -465,6 +466,120 @@ describe("createSaveHandler reorganize proposal", () => {
   });
 });
 
+/** listDirectory result decideSave needs to see two existing "antonio/meetings/*.md" documents. */
+function contentProviderWithTwoMeetingNotes(
+  overrides: Partial<Parameters<typeof createFakeContentProvider>[0]> = {},
+) {
+  return createFakeContentProvider({
+    listDirectory: async () => [
+      {
+        type: "document",
+        name: "kickoff.md",
+        path: "antonio/meetings/kickoff.md",
+      },
+      {
+        type: "document",
+        name: "sales-call.md",
+        path: "antonio/meetings/sales-call.md",
+      },
+    ],
+    ...overrides,
+  });
+}
+
+describe("createSaveHandler delete proposal", () => {
+  it("deletes a single file immediately, with no confirmation step", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const groq = fakeGroqReturning({
+      action: "delete",
+      paths: ["antonio/meetings/kickoff.md"],
+      commitMessage: "delete: kickoff note",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "delete the kickoff meeting note",
+    });
+
+    await createSaveHandler(
+      baseDeps({
+        contentWriter: writer,
+        contentProvider: contentProviderWithTwoMeetingNotes(),
+        groq,
+      }),
+    )(ctx);
+
+    expect(writes).toHaveLength(0);
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].path).toBe("antonio/meetings/kickoff.md");
+    expect(sendMessageCalls[0].text).toContain("antonio/meetings/kickoff.md");
+    expect(sendMessageCalls[0].keyboard?.inline_keyboard.flat()).toContainEqual(
+      expect.objectContaining({ text: "↩️ Undo: kickoff.md" }),
+    );
+  });
+
+  it("asks for confirmation before deleting 2+ files, and deletes nothing yet", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const groq = fakeGroqReturning({
+      action: "delete",
+      paths: ["antonio/meetings/kickoff.md", "antonio/meetings/sales-call.md"],
+      commitMessage: "delete: clear meetings folder",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "delete everything in the meetings folder",
+    });
+
+    await createSaveHandler(
+      baseDeps({
+        contentWriter: writer,
+        contentProvider: contentProviderWithTwoMeetingNotes(),
+        groq,
+      }),
+    )(ctx);
+
+    expect(writes).toHaveLength(0);
+    expect(deletes).toHaveLength(0);
+    expect(sendMessageCalls[0].text).toContain("antonio/meetings/kickoff.md");
+    expect(sendMessageCalls[0].text).toContain(
+      "antonio/meetings/sales-call.md",
+    );
+    expect(sendMessageCalls[0].keyboard?.inline_keyboard.flat()).toContainEqual(
+      expect.objectContaining({ text: "🗑️ Yes, delete" }),
+    );
+  });
+
+  it("executes a multi-file delete directly on round 2, with no confirmation step", async () => {
+    const { writer, deletes } = createFakeContentWriter();
+    const groq = fakeGroqReturning({
+      action: "delete",
+      paths: ["antonio/meetings/kickoff.md", "antonio/meetings/sales-call.md"],
+      commitMessage: "delete: clear meetings folder",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      messageText: "yes, delete both",
+      replyToMessageText:
+        "❓ Need a bit more info to save this:\n1. Which files?\n\n⎯⎯⎯ save-context (do not edit) ⎯⎯⎯\ndelete the old meeting notes",
+    });
+
+    await createSaveHandler(
+      baseDeps({
+        contentWriter: writer,
+        contentProvider: contentProviderWithTwoMeetingNotes(),
+        groq,
+      }),
+    )(ctx);
+
+    expect(deletes.map((d) => d.path)).toEqual([
+      "antonio/meetings/kickoff.md",
+      "antonio/meetings/sales-call.md",
+    ]);
+    expect(
+      sendMessageCalls[0].keyboard?.inline_keyboard.flat(),
+    ).not.toContainEqual(expect.objectContaining({ text: "🗑️ Yes, delete" }));
+  });
+});
+
 describe("createReorganizeConfirmHandler", () => {
   async function proposeReorganize(
     overrides: Partial<SaveDeps> = {},
@@ -595,6 +710,121 @@ describe("createReorganizeConfirmHandler", () => {
     });
 
     await createReorganizeConfirmHandler(baseDeps())(ctx, true);
+
+    expect(sendMessageCalls[0].text).toMatch(/no longer available/i);
+  });
+});
+
+describe("createDeleteConfirmHandler", () => {
+  async function proposeDelete(
+    overrides: Partial<SaveDeps> = {},
+  ): Promise<string> {
+    const groq = fakeGroqReturning({
+      action: "delete",
+      paths: ["antonio/meetings/kickoff.md", "antonio/meetings/sales-call.md"],
+      commitMessage: "delete: clear meetings folder",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "delete everything in the meetings folder",
+    });
+    await createSaveHandler(
+      baseDeps({
+        contentProvider: contentProviderWithTwoMeetingNotes(),
+        ...overrides,
+        groq,
+      }),
+    )(ctx);
+    return sendMessageCalls[0].text;
+  }
+
+  it("confirming deletes every proposed path", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const proposalText = await proposeDelete({ contentWriter: writer });
+
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: proposalText,
+    });
+    await createDeleteConfirmHandler(baseDeps({ contentWriter: writer }))(
+      ctx,
+      true,
+    );
+
+    expect(writes).toHaveLength(0);
+    expect(deletes.map((d) => d.path)).toEqual([
+      "antonio/meetings/kickoff.md",
+      "antonio/meetings/sales-call.md",
+    ]);
+    expect(sendMessageCalls[0].text).toContain("antonio/meetings/kickoff.md");
+    const undoButtons = (
+      sendMessageCalls[0].keyboard?.inline_keyboard.flat() ?? []
+    ).filter((b) => b.text.startsWith("↩️ Undo"));
+    expect(undoButtons).toHaveLength(2);
+  });
+
+  it("declining deletes nothing", async () => {
+    const { writer, deletes } = createFakeContentWriter();
+    const proposalText = await proposeDelete({ contentWriter: writer });
+
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: proposalText,
+    });
+    await createDeleteConfirmHandler(baseDeps({ contentWriter: writer }))(
+      ctx,
+      false,
+    );
+
+    expect(deletes).toHaveLength(0);
+    expect(sendMessageCalls[0].text).toMatch(/cancelled/i);
+  });
+
+  it("acknowledges the callback immediately", async () => {
+    const proposalText = await proposeDelete();
+    const { ctx, answerCallbackQueryCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: proposalText,
+    });
+
+    await createDeleteConfirmHandler(baseDeps())(ctx, false);
+
+    expect(answerCallbackQueryCalls).toHaveLength(1);
+  });
+
+  it("denies a non-editor", async () => {
+    const proposalText = await proposeDelete();
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 999,
+      callbackMessageText: proposalText,
+    });
+
+    await createDeleteConfirmHandler(baseDeps())(ctx, true);
+
+    expect(sendMessageCalls[0].text).toMatch(/private bot/i);
+  });
+
+  it("denies a proposal whose paths fall outside the caller's own folder", async () => {
+    const forgedProposal = `🗑️ Delete 1 file?\n\n⎯⎯⎯ delete-proposal (do not edit) ⎯⎯⎯\n${JSON.stringify(
+      { paths: ["someone-else/notes.md"], commitMessage: "delete" },
+    )}`;
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: forgedProposal,
+    });
+
+    await createDeleteConfirmHandler(baseDeps())(ctx, true);
+
+    expect(sendMessageCalls[0].text).toMatch(/private bot/i);
+  });
+
+  it("shows a friendly message when there's no pending proposal to recover", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: "just an ordinary message",
+    });
+
+    await createDeleteConfirmHandler(baseDeps())(ctx, true);
 
     expect(sendMessageCalls[0].text).toMatch(/no longer available/i);
   });

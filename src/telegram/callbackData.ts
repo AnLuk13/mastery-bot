@@ -39,6 +39,9 @@ export const SAVE_ANSWER_CALLBACK_DATA = "a";
 /** No payload, same reasoning as above: the pending reorganize proposal rides in the confirm/decline message's own text. */
 export const REORGANIZE_CONFIRM_CALLBACK_DATA = "y";
 export const REORGANIZE_DECLINE_CALLBACK_DATA = "n";
+/** No payload, same reasoning again: the pending delete proposal rides in the confirm/decline message's own text. Distinct from the reorganize sentinels above — otherwise a tap couldn't tell which kind of proposal it's confirming. */
+export const DELETE_CONFIRM_CALLBACK_DATA = "dy";
+export const DELETE_DECLINE_CALLBACK_DATA = "dn";
 
 export interface CleanupHint {
   /** message_id of the first extra message to delete (a consecutive run of `count` messages). */
@@ -61,6 +64,8 @@ export type DecodedCallback =
   | { type: "save-answer" }
   | { type: "reorganize-confirm" }
   | { type: "reorganize-decline" }
+  | { type: "delete-confirm" }
+  | { type: "delete-decline" }
   | { type: "too-long" }
   | { type: "invalid" };
 
@@ -135,6 +140,8 @@ export function decodeCallbackData(data: string): DecodedCallback {
   if (data === REORGANIZE_DECLINE_CALLBACK_DATA) {
     return { type: "reorganize-decline" };
   }
+  if (data === DELETE_CONFIRM_CALLBACK_DATA) return { type: "delete-confirm" };
+  if (data === DELETE_DECLINE_CALLBACK_DATA) return { type: "delete-decline" };
 
   if (data.startsWith(DOCUMENT_PREFIX)) {
     return decodePath("document", data.slice(DOCUMENT_PREFIX.length));

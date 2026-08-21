@@ -1,5 +1,7 @@
 import { InlineKeyboard } from "grammy";
 import {
+  DELETE_CONFIRM_CALLBACK_DATA,
+  DELETE_DECLINE_CALLBACK_DATA,
   encodeNavigateCallbackData,
   encodeRevertCallbackData,
   REORGANIZE_CONFIRM_CALLBACK_DATA,
@@ -53,6 +55,39 @@ export function buildReorganizeResultKeyboard(
         encodeNavigateCallbackData("document", target.path),
       );
     }
+    const revertData = encodeRevertCallbackData(
+      target.path,
+      target.beforeCommitSha,
+    );
+    if (revertData) {
+      keyboard.text(`↩️ Undo: ${target.label}`, revertData);
+    }
+  });
+
+  return keyboard;
+}
+
+/** Yes/No row for a multi-file delete proposal (see userMessages.ts's formatDeleteConfirmPrompt) — nothing is removed until one of these is tapped. */
+export function buildDeleteConfirmKeyboard(): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("🗑️ Yes, delete", DELETE_CONFIRM_CALLBACK_DATA)
+    .text("❌ No, keep them", DELETE_DECLINE_CALLBACK_DATA);
+}
+
+export interface DeleteResultTarget {
+  label: string;
+  path: string;
+  beforeCommitSha: string;
+}
+
+/** One row per deleted path, each independently revertible — undoing one restores just that file. */
+export function buildDeleteResultKeyboard(
+  targets: readonly DeleteResultTarget[],
+): InlineKeyboard {
+  const keyboard = new InlineKeyboard();
+
+  targets.forEach((target, index) => {
+    if (index > 0) keyboard.row();
     const revertData = encodeRevertCallbackData(
       target.path,
       target.beforeCommitSha,

@@ -270,6 +270,93 @@ describe("decideSave reorganize", () => {
   });
 });
 
+describe("decideSave delete", () => {
+  const multiFileCtx: SaveRequestContext = {
+    editorFolder: "andreea",
+    request: "delete everything in the meetings folder",
+    existingEntries: [
+      "andreea/meetings/kickoff.md",
+      "andreea/meetings/sales-call.md",
+      "andreea/networking/dns.md",
+    ],
+    clarifyRound: 0,
+  };
+
+  it("accepts a delete decision for a single existing document", async () => {
+    const groq = fakeGroq({
+      action: "delete",
+      paths: ["andreea/networking/dns.md"],
+      commitMessage: "delete: outdated dns note",
+    });
+    const decision = await decideSave(multiFileCtx, groq);
+    expect(decision).toEqual({
+      action: "delete",
+      paths: ["andreea/networking/dns.md"],
+      commitMessage: "delete: outdated dns note",
+    });
+  });
+
+  it("accepts a delete decision for multiple existing documents", async () => {
+    const groq = fakeGroq({
+      action: "delete",
+      paths: ["andreea/meetings/kickoff.md", "andreea/meetings/sales-call.md"],
+      commitMessage: "delete: clear out meetings folder",
+    });
+    const decision = await decideSave(multiFileCtx, groq);
+    expect(decision).toMatchObject({
+      action: "delete",
+      paths: ["andreea/meetings/kickoff.md", "andreea/meetings/sales-call.md"],
+    });
+  });
+
+  it("rejects a delete path that isn't one of the editor's existing documents", async () => {
+    const groq = fakeGroq({
+      action: "delete",
+      paths: ["andreea/made-up.md"],
+      commitMessage: "delete",
+    });
+    await expect(decideSave(multiFileCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("rejects a delete path escaping the editor's folder via traversal", async () => {
+    const groq = fakeGroq({
+      action: "delete",
+      paths: ["andreea/../someone-else/notes.md"],
+      commitMessage: "delete",
+    });
+    await expect(decideSave(multiFileCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("de-duplicates repeated paths in a delete decision", async () => {
+    const groq = fakeGroq({
+      action: "delete",
+      paths: ["andreea/networking/dns.md", "andreea/networking/dns.md"],
+      commitMessage: "delete",
+    });
+    const decision = await decideSave(multiFileCtx, groq);
+    expect(decision).toMatchObject({
+      paths: ["andreea/networking/dns.md"],
+    });
+  });
+
+  it("accepts a delete decision on round 2 the same as round 1 (execution timing, not validation, differs there — see save.ts)", async () => {
+    const groq = fakeGroq({
+      action: "delete",
+      paths: ["andreea/meetings/kickoff.md", "andreea/meetings/sales-call.md"],
+      commitMessage: "delete",
+    });
+    const decision = await decideSave(
+      { ...multiFileCtx, clarifyRound: 1 },
+      groq,
+    );
+    expect(decision.action).toBe("delete");
+  });
+});
+
 describe("composeUpdate", () => {
   it("returns the merged content and commit message", async () => {
     const groq = fakeGroq({

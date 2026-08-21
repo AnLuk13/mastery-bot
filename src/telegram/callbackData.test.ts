@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeCallbackData,
+  DELETE_CONFIRM_CALLBACK_DATA,
+  DELETE_DECLINE_CALLBACK_DATA,
   encodeLimitsCallbackData,
   encodeNavigateCallbackData,
   encodeRevertCallbackData,
@@ -113,6 +115,15 @@ describe("decodeCallbackData", () => {
     });
     expect(decodeCallbackData(REORGANIZE_DECLINE_CALLBACK_DATA)).toEqual({
       type: "reorganize-decline",
+    });
+  });
+
+  it("decodes the delete confirm/decline sentinels", () => {
+    expect(decodeCallbackData(DELETE_CONFIRM_CALLBACK_DATA)).toEqual({
+      type: "delete-confirm",
+    });
+    expect(decodeCallbackData(DELETE_DECLINE_CALLBACK_DATA)).toEqual({
+      type: "delete-decline",
     });
   });
 

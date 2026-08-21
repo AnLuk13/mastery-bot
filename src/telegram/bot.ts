@@ -12,6 +12,7 @@ import { createClearHandler } from "./handlers/clear";
 import { createDocumentCallbackHandler } from "./handlers/document";
 import { renderDirectory } from "./handlers/navigation";
 import {
+  createDeleteConfirmHandler,
   createReorganizeConfirmHandler,
   createRevertHandler,
   createSaveFromMessageHandler,
@@ -98,6 +99,7 @@ export function createBot(options: CreateBotOptions): Bot {
   const saveHandler = createSaveHandler(saveDeps);
   const saveFromMessageHandler = createSaveFromMessageHandler(saveDeps);
   const reorganizeConfirmHandler = createReorganizeConfirmHandler(saveDeps);
+  const deleteConfirmHandler = createDeleteConfirmHandler(saveDeps);
 
   bot.command("save", async (grammyCtx) => {
     await saveHandler(adaptContext(grammyCtx));
@@ -168,6 +170,12 @@ export function createBot(options: CreateBotOptions): Bot {
         break;
       case "reorganize-decline":
         await reorganizeConfirmHandler(ctx, false);
+        break;
+      case "delete-confirm":
+        await deleteConfirmHandler(ctx, true);
+        break;
+      case "delete-decline":
+        await deleteConfirmHandler(ctx, false);
         break;
       case "search-help":
         await handleSearchHelpCallback(ctx);
