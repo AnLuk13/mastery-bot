@@ -53,17 +53,26 @@ export async function answerQuestion(
   question: string,
   userId: number | undefined,
   deps: AnswerQuestionDeps,
+  priorTranscript = "",
 ): Promise<Answer> {
-  const queryVector = await deps.embed(question);
+  // A pronoun-heavy follow-up ("summarize that") carries little retrievable
+  // meaning on its own — embedding it together with the prior turns gets
+  // notes retrieval back on topic instead of searching on "that" alone.
+  const queryVector = await deps.embed(
+    priorTranscript ? `${priorTranscript}\n${question}` : question,
+  );
   const retrieved = retrieveTopK(queryVector, deps.index, TOP_K).filter(
     (chunk) => isPathVisible(chunk.path, userId, deps.privateFolders),
   );
 
+  const conversationBlock = priorTranscript
+    ? `Prior conversation in this thread:\n${priorTranscript}\n\n`
+    : "";
   const messages: ChatMessage[] = [
     { role: "system", content: SYSTEM_PROMPT },
     {
       role: "user",
-      content: `Retrieved notes:\n\n${buildContextBlock(retrieved)}\n\nQuestion: ${question}`,
+      content: `${conversationBlock}Retrieved notes:\n\n${buildContextBlock(retrieved)}\n\nQuestion: ${question}`,
     },
   ];
 

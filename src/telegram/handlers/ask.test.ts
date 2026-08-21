@@ -44,7 +44,7 @@ describe("createAskHandler", () => {
 
     expect(sendTypingCalls).toHaveLength(1);
     expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0].text).toBe("an answer");
+    expect(sendMessageCalls[0].text).toContain("an answer");
     expect(sendMessageCalls[0].parseMode).toBe("HTML");
     expect(sendMessageCalls[0].keyboard?.inline_keyboard).toEqual([
       [
@@ -102,6 +102,67 @@ describe("createAskHandler", () => {
 
     expect(sendMessageCalls).toHaveLength(0);
     expect(sendTypingCalls).toHaveLength(0);
+  });
+
+  it("embeds a reply-recoverable context block with the visible answer", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      messageText: "what are embeddings?",
+    });
+
+    await createAskHandler(makeDeps())(ctx);
+
+    expect(sendMessageCalls[0].text).toContain("Q: what are embeddings?");
+    expect(sendMessageCalls[0].text).toContain("A: an answer");
+    expect(sendMessageCalls[0].text).toContain("tg-spoiler");
+  });
+
+  it("passes the prior transcript from a reply into the model call and accumulates it further", async () => {
+    const capturedMessages: unknown[] = [];
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async (messages: unknown) => {
+          capturedMessages.push(messages);
+          return { text: "second answer", rateLimit: undefined };
+        },
+      },
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      messageText: "and what about vector search?",
+      replyToMessageText:
+        "an answer\n\n<tg-spoiler>💬 ⎯⎯⎯ ask-context (tap to expand, do not edit) ⎯⎯⎯\nQ: what are embeddings?\nA: an answer</tg-spoiler>",
+    });
+
+    await createAskHandler(deps)(ctx);
+
+    const prompt = JSON.stringify(capturedMessages);
+    expect(prompt).toContain("Q: what are embeddings?");
+    expect(prompt).toContain("A: an answer");
+    expect(sendMessageCalls[0].text).toContain("Q: what are embeddings?");
+    expect(sendMessageCalls[0].text).toContain(
+      "Q: and what about vector search?",
+    );
+    expect(sendMessageCalls[0].text).toContain("A: second answer");
+  });
+
+  it("starts a fresh transcript when replying to an ordinary message, not a prior ask-context", async () => {
+    const capturedMessages: unknown[] = [];
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async (messages: unknown) => {
+          capturedMessages.push(messages);
+          return { text: "an answer", rateLimit: undefined };
+        },
+      },
+    });
+    const { ctx } = createFakeBotContext({
+      messageText: "what are embeddings?",
+      replyToMessageText: "just some unrelated earlier message",
+    });
+
+    await createAskHandler(deps)(ctx);
+
+    const prompt = JSON.stringify(capturedMessages);
+    expect(prompt).not.toContain("Prior conversation");
   });
 
   it("replies with a safe message when the model call fails", async () => {

@@ -9,6 +9,7 @@ import {
 } from "@/content";
 import { GroqRateLimitedError, GroqUnavailableError } from "@/rag/errors";
 import type { RateLimitInfo } from "@/rag/groqClient";
+import { escapeHtml } from "./formatting/html";
 
 export const ACCESS_DENIED_MESSAGE = "🔒 This is a private bot.";
 export const INVALID_NAVIGATION_MESSAGE = "⚠️ Invalid navigation.";
@@ -65,8 +66,71 @@ export function formatRateLimitMessage(rateLimit: RateLimitInfo): string {
   );
 }
 
+const ASK_CONTEXT_MARKER = "⎯⎯⎯ ask-context (tap to expand, do not edit) ⎯⎯⎯";
+const ASK_TURN_SEPARATOR = "\n\n===\n\n";
+// Chars of transcript kept; oldest whole turns are dropped first, never
+// truncated mid-turn, so what survives always reads as complete exchanges.
+const ASK_CONTEXT_BUDGET = 2500;
+
+/** True when `replyToMessageText` is a reply to one of our own /ask answers carrying prior context. */
+export function isAskContinuation(
+  replyToMessageText: string | undefined,
+): boolean {
+  return (
+    replyToMessageText !== undefined &&
+    replyToMessageText.includes(ASK_CONTEXT_MARKER)
+  );
+}
+
+/**
+ * Recovers the running Q/A transcript embedded in a prior /ask answer, from
+ * the reply-to text. Telegram delivers `message.text` as plain text with
+ * formatting tags stripped (conveyed separately via `entities`), so in
+ * practice there's no literal `</tg-spoiler>` to worry about — stripped
+ * defensively anyway in case that ever isn't true.
+ */
+export function extractAskTranscript(replyToMessageText: string): string {
+  const index = replyToMessageText.indexOf(ASK_CONTEXT_MARKER);
+  if (index === -1) return "";
+  return replyToMessageText
+    .slice(index + ASK_CONTEXT_MARKER.length)
+    .replace(/<\/tg-spoiler>\s*$/i, "")
+    .trim();
+}
+
+/**
+ * Appends a new turn to a running transcript. Every answer embeds the FULL
+ * transcript so far (not just its own turn), so replying to any past answer
+ * in a chain recovers everything up to that point — a chain of replies each
+ * derived from the last stays part of the context with no extra tracking.
+ */
+export function appendAskTurn(
+  transcript: string,
+  question: string,
+  answer: string,
+): string {
+  const turn = `Q: ${question}\nA: ${answer}`;
+  const turns =
+    transcript === ""
+      ? [turn]
+      : [...transcript.split(ASK_TURN_SEPARATOR), turn];
+  while (
+    turns.length > 1 &&
+    turns.join(ASK_TURN_SEPARATOR).length > ASK_CONTEXT_BUDGET
+  ) {
+    turns.shift();
+  }
+  return turns.join(ASK_TURN_SEPARATOR);
+}
+
+/** The invisible-until-tapped block riding on an /ask answer so a reply can continue the conversation. Empty transcript means no block at all. */
+export function formatAskContextBlock(transcript: string): string {
+  if (transcript === "") return "";
+  return `\n\n<tg-spoiler>💬 ${ASK_CONTEXT_MARKER}\n${escapeHtml(transcript)}</tg-spoiler>`;
+}
+
 export const SAVE_USAGE_MESSAGE =
-  "💾 Usage: /save <note text>, or upload a .txt/.md file.";
+  "💾 Usage: /save <note text>, upload a .txt/.md file, or reply to any message with /save to save its content.";
 export const UNSUPPORTED_SAVE_FILE_MESSAGE =
   "⚠️ Only .txt and .md file uploads are supported.";
 

@@ -220,6 +220,65 @@ describe("createSaveHandler", () => {
     expect(prompt).toContain("networking");
   });
 
+  it("saves the content of an ordinary replied-to message when /save is used with no other text", async () => {
+    const capturedMessages: unknown[] = [];
+    const groq = {
+      createChatCompletion: async (messages: unknown) => {
+        capturedMessages.push(messages);
+        return {
+          text: JSON.stringify({
+            action: "write",
+            path: "antonio/networking/keepalive.md",
+            isNewFile: true,
+            content: "# Keepalive",
+            commitMessage: "save",
+          }),
+          rateLimit: undefined,
+        };
+      },
+    };
+    const { ctx } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "",
+      replyToMessageText: "TCP keepalive should be checked on the LB.",
+    });
+
+    await createSaveHandler(baseDeps({ groq }))(ctx);
+
+    const prompt = JSON.stringify(capturedMessages);
+    expect(prompt).toContain("TCP keepalive should be checked on the LB.");
+  });
+
+  it("combines a replied-to message's content with typed instructions", async () => {
+    const capturedMessages: unknown[] = [];
+    const groq = {
+      createChatCompletion: async (messages: unknown) => {
+        capturedMessages.push(messages);
+        return {
+          text: JSON.stringify({
+            action: "write",
+            path: "antonio/networking/keepalive.md",
+            isNewFile: true,
+            content: "# Keepalive",
+            commitMessage: "save",
+          }),
+          rateLimit: undefined,
+        };
+      },
+    };
+    const { ctx } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "file this under networking",
+      replyToMessageText: "TCP keepalive should be checked on the LB.",
+    });
+
+    await createSaveHandler(baseDeps({ groq }))(ctx);
+
+    const prompt = JSON.stringify(capturedMessages);
+    expect(prompt).toContain("TCP keepalive should be checked on the LB.");
+    expect(prompt).toContain("file this under networking");
+  });
+
   it("sends a safe error message when the model call fails", async () => {
     const groq = {
       createChatCompletion: async () => {

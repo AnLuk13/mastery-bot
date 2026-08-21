@@ -106,6 +106,15 @@ export function createSaveHandler(deps: SaveDeps) {
       const answer = (ctx.messageText ?? "").trim();
       request = `${original}\n\nAdditional info from the user:\n${answer}`;
       clarifyRound = 1;
+    } else if (ctx.replyToMessageText !== undefined) {
+      // /save used as a reply to an earlier message (e.g. a prior /ask
+      // answer) — save that message's content, optionally refined by
+      // whatever was typed alongside /save.
+      const typed = (ctx.commandArgs ?? "").trim();
+      request = typed
+        ? `${ctx.replyToMessageText}\n\nAdditional instructions from the user:\n${typed}`
+        : ctx.replyToMessageText;
+      clarifyRound = 0;
     } else {
       const text = (ctx.commandArgs ?? "").trim();
       if (text === "") {

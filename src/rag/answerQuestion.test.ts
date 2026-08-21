@@ -130,4 +130,47 @@ describe("answerQuestion", () => {
     expect(userMessage.content).toContain("Embeddings map text to vectors.");
     expect(userMessage.content).toContain("what are embeddings?");
   });
+
+  it("includes prior transcript in the prompt when provided", async () => {
+    const deps = makeDeps();
+    await answerQuestion(
+      "and what about vector search?",
+      undefined,
+      deps,
+      "Q: what are embeddings?\nA: they map text to vectors.",
+    );
+
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).toContain("Prior conversation in this thread");
+    expect(userMessage.content).toContain("Q: what are embeddings?");
+    expect(userMessage.content).toContain("and what about vector search?");
+  });
+
+  it("embeds the prior transcript together with a pronoun-heavy follow-up for retrieval", async () => {
+    let embedInput: string | undefined;
+    const deps = makeDeps({
+      embed: async (text) => {
+        embedInput = text;
+        return [1, 0];
+      },
+    });
+
+    await answerQuestion(
+      "summarize that",
+      undefined,
+      deps,
+      "Q: what are embeddings?\nA: they map text to vectors.",
+    );
+
+    expect(embedInput).toContain("what are embeddings?");
+    expect(embedInput).toContain("summarize that");
+  });
+
+  it("omits the prior-conversation block entirely when no transcript is given", async () => {
+    const deps = makeDeps();
+    await answerQuestion("what are embeddings?", undefined, deps);
+
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).not.toContain("Prior conversation");
+  });
 });
