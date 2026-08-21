@@ -113,7 +113,7 @@ describe("createAskHandler", () => {
 
     expect(sendMessageCalls[0].text).toContain("Q: what are embeddings?");
     expect(sendMessageCalls[0].text).toContain("A: an answer");
-    expect(sendMessageCalls[0].text).toContain("tg-spoiler");
+    expect(sendMessageCalls[0].text).toContain("blockquote expandable");
   });
 
   it("passes the prior transcript from a reply into the model call and accumulates it further", async () => {
@@ -129,7 +129,7 @@ describe("createAskHandler", () => {
     const { ctx, sendMessageCalls } = createFakeBotContext({
       messageText: "and what about vector search?",
       replyToMessageText:
-        "an answer\n\n<tg-spoiler>💬 ⎯⎯⎯ ask-context (tap to expand, do not edit) ⎯⎯⎯\nQ: what are embeddings?\nA: an answer</tg-spoiler>",
+        "an answer\n\n💬 ⎯⎯⎯ ask-context (tap to expand, do not edit) ⎯⎯⎯\nQ: what are embeddings?\nA: an answer",
     });
 
     await createAskHandler(deps)(ctx);
@@ -164,6 +164,32 @@ describe("createAskHandler", () => {
     const prompt = JSON.stringify(capturedMessages);
     expect(prompt).toContain("Prior conversation");
     expect(prompt).toContain("Latest news from Chișinău");
+  });
+
+  it("gives the model the full raw fallback text, but truncates it before re-embedding for the next reply", async () => {
+    const longPriorAnswer = "x".repeat(2000);
+    const capturedMessages: unknown[] = [];
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async (messages: unknown) => {
+          capturedMessages.push(messages);
+          return { text: "translated text", rateLimit: undefined };
+        },
+      },
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      messageText: "translate that",
+      replyToMessageText: longPriorAnswer,
+    });
+
+    await createAskHandler(deps)(ctx);
+
+    // The model saw the full thing...
+    expect(JSON.stringify(capturedMessages)).toContain(longPriorAnswer);
+    // ...but the hidden block carried forward for the *next* reply doesn't.
+    const outgoingBlock = sendMessageCalls[0].text;
+    expect(outgoingBlock).not.toContain(longPriorAnswer);
+    expect(outgoingBlock).toContain("…");
   });
 
   it("starts a genuinely fresh transcript only when there's no reply at all", async () => {

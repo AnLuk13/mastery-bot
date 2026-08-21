@@ -70,7 +70,12 @@ const ASK_CONTEXT_MARKER = "⎯⎯⎯ ask-context (tap to expand, do not edit) �
 const ASK_TURN_SEPARATOR = "\n\n===\n\n";
 // Chars of transcript kept; oldest whole turns are dropped first, never
 // truncated mid-turn, so what survives always reads as complete exchanges.
-const ASK_CONTEXT_BUDGET = 2500;
+const ASK_CONTEXT_BUDGET = 1200;
+// Each stored answer is capped independently too — a single long answer (a
+// news roundup, a long explanation) would otherwise dominate the whole
+// budget on its own, and the hidden block is still a visible blurred box
+// taking up screen space even though it's collapsed.
+const MAX_STORED_ANSWER_LENGTH = 350;
 
 /** True when `replyToMessageText` is a reply to one of our own /ask answers carrying prior context. */
 export function isAskContinuation(
@@ -86,7 +91,7 @@ export function isAskContinuation(
  * Recovers the running Q/A transcript embedded in a prior /ask answer, from
  * the reply-to text. Telegram delivers `message.text` as plain text with
  * formatting tags stripped (conveyed separately via `entities`), so in
- * practice there's no literal `</tg-spoiler>` to worry about — stripped
+ * practice there's no literal `</blockquote>` to worry about — stripped
  * defensively anyway in case that ever isn't true.
  */
 export function extractAskTranscript(replyToMessageText: string): string {
@@ -94,8 +99,15 @@ export function extractAskTranscript(replyToMessageText: string): string {
   if (index === -1) return "";
   return replyToMessageText
     .slice(index + ASK_CONTEXT_MARKER.length)
-    .replace(/<\/tg-spoiler>\s*$/i, "")
+    .replace(/<\/blockquote>\s*$/i, "")
     .trim();
+}
+
+/** Caps a single piece of text before it goes into the hidden context block — used both for a newly-answered turn and for the raw-reply fallback below, so neither path can dominate the block on its own. */
+export function truncateForAskContext(text: string): string {
+  return text.length > MAX_STORED_ANSWER_LENGTH
+    ? `${text.slice(0, MAX_STORED_ANSWER_LENGTH)}…`
+    : text;
 }
 
 /**
@@ -109,7 +121,7 @@ export function appendAskTurn(
   question: string,
   answer: string,
 ): string {
-  const turn = `Q: ${question}\nA: ${answer}`;
+  const turn = `Q: ${question}\nA: ${truncateForAskContext(answer)}`;
   const turns =
     transcript === ""
       ? [turn]
@@ -123,10 +135,17 @@ export function appendAskTurn(
   return turns.join(ASK_TURN_SEPARATOR);
 }
 
-/** The invisible-until-tapped block riding on an /ask answer so a reply can continue the conversation. Empty transcript means no block at all. */
+/**
+ * The collapsed-by-default block riding on an /ask answer so a reply can
+ * continue the conversation. Uses an expandable blockquote, not a spoiler:
+ * a spoiler only blurs text in place — the message still occupies full
+ * vertical space either way — while an expandable blockquote actually
+ * collapses to a couple of preview lines with a "Show more" toggle, which is
+ * what "hide it away" actually needs here. Empty transcript means no block.
+ */
 export function formatAskContextBlock(transcript: string): string {
   if (transcript === "") return "";
-  return `\n\n<tg-spoiler>💬 ${ASK_CONTEXT_MARKER}\n${escapeHtml(transcript)}</tg-spoiler>`;
+  return `\n\n<blockquote expandable>💬 ${ASK_CONTEXT_MARKER}\n${escapeHtml(transcript)}</blockquote>`;
 }
 
 export const SAVE_USAGE_MESSAGE =

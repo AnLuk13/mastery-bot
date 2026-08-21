@@ -8,6 +8,7 @@ import {
   extractAskTranscript,
   formatAskContextBlock,
   isAskContinuation,
+  truncateForAskContext,
 } from "../userMessages";
 
 const TELEGRAM_MESSAGE_LIMIT = 4096;
@@ -18,13 +19,15 @@ export function createAskHandler(deps: AnswerQuestionDeps) {
     if (question === "") return;
 
     // Prefer the structured transcript when the marker survived (it's clean
-    // Q/A text with the marker itself stripped out). If it didn't — e.g. the
-    // prior answer was too long to carry the context block at all — fall
-    // back to the replied-to message's own visible text. A reply always
-    // means "this is relevant," whether or not our own bookkeeping made it
-    // through, and something is a far better answer than "I don't know what
-    // you're referring to."
-    const priorTranscript = isAskContinuation(ctx.replyToMessageText)
+    // Q/A text with the marker itself stripped out, and already
+    // size-disciplined from being built up via appendAskTurn on every prior
+    // round). If it didn't — e.g. the prior answer was too long to carry the
+    // context block at all — fall back to the replied-to message's own
+    // visible text: a reply always means "this is relevant," whether or not
+    // our own bookkeeping made it through, and something is a far better
+    // answer than "I don't know what you're referring to."
+    const isMarkedContinuation = isAskContinuation(ctx.replyToMessageText);
+    const priorTranscript = isMarkedContinuation
       ? extractAskTranscript(ctx.replyToMessageText ?? "")
       : (ctx.replyToMessageText ?? "");
 
@@ -52,8 +55,18 @@ export function createAskHandler(deps: AnswerQuestionDeps) {
       // an invisible-until-tapped spoiler block, so replying to it — or to any
       // earlier answer in the same chain — carries the whole conversation so
       // far back in, with no server-side session needed. Dropped silently if it
-      // would push the last message over Telegram's length limit.
-      const transcript = appendAskTurn(priorTranscript, question, answer.text);
+      // would push the last message over Telegram's length limit. The raw
+      // fallback text (unlike a marker-extracted transcript) was never
+      // capped, so it's truncated here specifically — the model itself still
+      // saw it in full a moment ago, this only bounds what gets carried
+      // forward into the next hidden block.
+      const transcript = appendAskTurn(
+        isMarkedContinuation
+          ? priorTranscript
+          : truncateForAskContext(priorTranscript),
+        question,
+        answer.text,
+      );
       const contextBlock = formatAskContextBlock(transcript);
 
       for (let i = 0; i < messages.length; i++) {

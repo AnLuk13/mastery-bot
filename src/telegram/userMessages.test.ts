@@ -13,6 +13,7 @@ import {
   formatSaveSuccess,
   isAskContinuation,
   isClarifyContinuation,
+  truncateForAskContext,
 } from "./userMessages";
 
 describe("describeAskError", () => {
@@ -132,6 +133,14 @@ describe("appendAskTurn / isAskContinuation / extractAskTranscript / formatAskCo
     expect(qCount).toBe(aCount);
   });
 
+  it("caps a single stored answer even when it alone would fit the overall budget", () => {
+    const longAnswer = "y".repeat(2000);
+    const transcript = appendAskTurn("", "a question", longAnswer);
+
+    expect(transcript.length).toBeLessThan(longAnswer.length);
+    expect(transcript).toContain("…");
+  });
+
   it("returns an empty block for an empty transcript", () => {
     expect(formatAskContextBlock("")).toBe("");
   });
@@ -148,5 +157,18 @@ describe("appendAskTurn / isAskContinuation / extractAskTranscript / formatAskCo
     expect(block).toContain("a&lt;b&gt;");
     expect(block).toContain("1 &lt; 2 &amp;&amp; 3 &gt; 1");
     expect(block).not.toContain("1 < 2 && 3 > 1");
+  });
+});
+
+describe("truncateForAskContext", () => {
+  it("leaves short text untouched", () => {
+    expect(truncateForAskContext("short")).toBe("short");
+  });
+
+  it("truncates long text with an ellipsis", () => {
+    const long = "z".repeat(1000);
+    const truncated = truncateForAskContext(long);
+    expect(truncated.length).toBeLessThan(long.length);
+    expect(truncated.endsWith("…")).toBe(true);
   });
 });
