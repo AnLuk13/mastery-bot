@@ -8,11 +8,15 @@ name: Reindex embeddings and deploy
 # runs on a schedule instead — no code change needed to pick up new/edited
 # notes, just a bounded delay.
 on:
-  schedule:
-    # Every 30 minutes. Adjust freely — a personal, low-volume knowledge
-    # base doesn't need faster than this, and a no-op run (nothing changed)
-    # costs almost nothing.
-    - cron: "*/30 * * * *"
+  # Schedule TEMPORARILY DISABLED — a reindex from this workflow deployed an
+  # embeddings index whose growth (555 -> 733 chunks) correlated exactly with
+  # production going down (every request 500ing, even /start, no logged
+  # request — consistent with a cold-start/init failure). Re-enable the
+  # schedule below once the actual cause is confirmed and fixed; until then
+  # this only runs when triggered manually, so it can't silently repeat the
+  # outage. See antonio/mastery-bot/08-lessons-and-bugs.md once documented.
+  # schedule:
+  #   - cron: "*/30 * * * *"
   workflow_dispatch: {} # manual "run now" from the Actions tab
 
 permissions:
