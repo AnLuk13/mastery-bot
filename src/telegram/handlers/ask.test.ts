@@ -144,7 +144,29 @@ describe("createAskHandler", () => {
     expect(sendMessageCalls[0].text).toContain("A: second answer");
   });
 
-  it("starts a fresh transcript when replying to an ordinary message, not a prior ask-context", async () => {
+  it("falls back to the raw replied-to text as context when it carries no ask-context marker (e.g. a prior answer too long to embed one)", async () => {
+    const capturedMessages: unknown[] = [];
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async (messages: unknown) => {
+          capturedMessages.push(messages);
+          return { text: "an answer", rateLimit: undefined };
+        },
+      },
+    });
+    const { ctx } = createFakeBotContext({
+      messageText: "translate that into romanian",
+      replyToMessageText: "Latest news from Chișinău: some long roundup...",
+    });
+
+    await createAskHandler(deps)(ctx);
+
+    const prompt = JSON.stringify(capturedMessages);
+    expect(prompt).toContain("Prior conversation");
+    expect(prompt).toContain("Latest news from Chișinău");
+  });
+
+  it("starts a genuinely fresh transcript only when there's no reply at all", async () => {
     const capturedMessages: unknown[] = [];
     const deps = makeDeps({
       groq: {
@@ -156,7 +178,6 @@ describe("createAskHandler", () => {
     });
     const { ctx } = createFakeBotContext({
       messageText: "what are embeddings?",
-      replyToMessageText: "just some unrelated earlier message",
     });
 
     await createAskHandler(deps)(ctx);

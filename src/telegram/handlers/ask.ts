@@ -17,9 +17,16 @@ export function createAskHandler(deps: AnswerQuestionDeps) {
     const question = (ctx.messageText ?? "").trim();
     if (question === "") return;
 
+    // Prefer the structured transcript when the marker survived (it's clean
+    // Q/A text with the marker itself stripped out). If it didn't — e.g. the
+    // prior answer was too long to carry the context block at all — fall
+    // back to the replied-to message's own visible text. A reply always
+    // means "this is relevant," whether or not our own bookkeeping made it
+    // through, and something is a far better answer than "I don't know what
+    // you're referring to."
     const priorTranscript = isAskContinuation(ctx.replyToMessageText)
       ? extractAskTranscript(ctx.replyToMessageText ?? "")
-      : "";
+      : (ctx.replyToMessageText ?? "");
 
     await ctx.sendTyping();
 
