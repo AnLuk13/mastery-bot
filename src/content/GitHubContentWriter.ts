@@ -75,6 +75,41 @@ export class GitHubContentWriter {
     return { path: canonical, beforeCommitSha };
   }
 
+  /**
+   * Deletes an existing file, returning the pre-delete HEAD sha the same way
+   * write() does — so the existing revert() (a generic "restore this path to
+   * what it looked like at that commit" operation) undoes a delete exactly
+   * like it undoes any other write, with no dedicated "undelete" logic.
+   */
+  async delete(inputPath: string, message: string): Promise<WriteResult> {
+    const canonical = normalizeRelativePath(inputPath);
+    if (canonical === "" || !hasMarkdownExtension(canonical)) {
+      throw new InvalidPathError(`Not a writable document path: ${canonical}`);
+    }
+    const githubPath = this.toGitHubPath(canonical);
+
+    const beforeCommitSha = await this.client.getBranchHeadSha(this.branch);
+    const existing = await this.client.getContents(
+      githubPath,
+      this.branch,
+      canonical,
+    );
+    if (Array.isArray(existing) || existing.type !== "file") {
+      throw new ContentProviderUnavailableError(
+        "Cannot delete: path is not a file",
+      );
+    }
+
+    await this.client.deleteFile(
+      githubPath,
+      existing.sha,
+      message,
+      this.branch,
+    );
+
+    return { path: canonical, beforeCommitSha };
+  }
+
   async revert(
     inputPath: string,
     beforeCommitSha: string,
@@ -89,37 +124,49 @@ export class GitHubContentWriter {
       canonical,
     );
 
-    let current;
+    // The path may currently not exist at all — either it was never created
+    // (nothing to do), or it was deleted since beforeCommitSha (reverting a
+    // delete needs to recreate it, not no-op). Either way, a missing current
+    // sha just means the write below is a create rather than an update.
+    let currentSha: string | undefined;
     try {
-      current = await this.client.getContents(
+      const current = await this.client.getContents(
         githubPath,
         this.branch,
         canonical,
       );
+      if (Array.isArray(current) || current.type !== "file") {
+        throw new ContentProviderUnavailableError(
+          "Cannot revert: path is not a file",
+        );
+      }
+      currentSha = current.sha;
     } catch (error) {
-      if (error instanceof ContentNotFoundError) return; // already gone — nothing left to revert
-      throw error;
-    }
-    if (Array.isArray(current) || current.type !== "file") {
-      throw new ContentProviderUnavailableError(
-        "Cannot revert: path is not a file",
-      );
+      if (!(error instanceof ContentNotFoundError)) throw error;
+      currentSha = undefined;
     }
 
     if (priorContent === undefined) {
-      await this.client.deleteFile(
-        githubPath,
-        current.sha,
-        message,
-        this.branch,
-      );
+      // Didn't exist as of beforeCommitSha — revert means "shouldn't exist."
+      if (currentSha !== undefined) {
+        await this.client.deleteFile(
+          githubPath,
+          currentSha,
+          message,
+          this.branch,
+        );
+      }
+      // else: already gone, nothing to do.
     } else {
+      // Existed as of beforeCommitSha — revert means "restore it," whether
+      // it currently exists (update, sha required) or was deleted since
+      // (create, sha omitted — GitHub rejects a create that passes one).
       await this.client.createOrUpdateFile(
         githubPath,
         priorContent,
         message,
         this.branch,
-        current.sha,
+        currentSha,
       );
     }
   }

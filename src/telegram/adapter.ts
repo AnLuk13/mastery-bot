@@ -27,6 +27,10 @@ export function adaptContext(ctx: Context): BotContext {
       ctx.message?.reply_to_message && "text" in ctx.message.reply_to_message
         ? ctx.message.reply_to_message.text
         : undefined,
+    callbackMessageText:
+      ctx.callbackQuery?.message && "text" in ctx.callbackQuery.message
+        ? ctx.callbackQuery.message.text
+        : undefined,
     document: ctx.message?.document
       ? {
           fileId: ctx.message.document.file_id,

@@ -3,6 +3,7 @@ import type { RateLimitInfo } from "@/rag/groqClient";
 import {
   encodeLimitsCallbackData,
   encodeNavigateCallbackData,
+  SAVE_ANSWER_CALLBACK_DATA,
 } from "../callbackData";
 
 const MAX_SOURCE_BUTTONS = 4;
@@ -14,11 +15,14 @@ function basename(canonicalPath: string): string {
 
 /**
  * One row per cited source document (so the user can jump straight to it), an
- * optional Groq usage row (tap to see a toast — Telegram buttons can't be
- * inert/label-only), and Home.
+ * optional "Save this" row (only for editors — one tap persists the answer
+ * itself as a note, rather than the user needing to know the reply-then-/save
+ * trick), an optional Groq usage row (tap to see a toast — Telegram buttons
+ * can't be inert/label-only), and Home.
  */
 export function buildAskResultKeyboard(
   sources: readonly string[],
+  canSave: boolean,
   rateLimit?: RateLimitInfo,
 ): InlineKeyboard {
   const keyboard = new InlineKeyboard();
@@ -30,6 +34,10 @@ export function buildAskResultKeyboard(
         encodeNavigateCallbackData("document", source),
       )
       .row();
+  }
+
+  if (canSave) {
+    keyboard.text("💾 Save this", SAVE_ANSWER_CALLBACK_DATA).row();
   }
 
   const limitsData = rateLimit

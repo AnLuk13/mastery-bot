@@ -93,6 +93,51 @@ describe("GitHubContentWriter.write", () => {
   });
 });
 
+describe("GitHubContentWriter.delete", () => {
+  it("deletes an existing file and returns the pre-delete HEAD sha", async () => {
+    const fetchImpl = createMockGitHubFetch(fixture);
+    const writer = makeWriter(fetchImpl);
+
+    const result = await writer.delete(
+      "antonio/networking/dns.md",
+      "reorganize: remove old copy",
+    );
+    expect(result.path).toBe("antonio/networking/dns.md");
+    expect(result.beforeCommitSha).toBe("commit-0");
+
+    await expect(
+      makeReader(fetchImpl).getDocument("antonio/networking/dns.md"),
+    ).rejects.toThrow();
+  });
+
+  it("is undoable via the existing generic revert()", async () => {
+    const fetchImpl = createMockGitHubFetch(fixture);
+    const writer = makeWriter(fetchImpl);
+
+    const { beforeCommitSha } = await writer.delete(
+      "antonio/networking/dns.md",
+      "reorganize: remove old copy",
+    );
+    await writer.revert(
+      "antonio/networking/dns.md",
+      beforeCommitSha,
+      "revert: undo delete",
+    );
+
+    const doc = await makeReader(fetchImpl).getDocument(
+      "antonio/networking/dns.md",
+    );
+    expect(doc.content).toBe("# DNS\nOriginal content.");
+  });
+
+  it("rejects a non-document path", async () => {
+    const writer = makeWriter(createMockGitHubFetch(fixture));
+    await expect(
+      writer.delete("antonio/networking", "message"),
+    ).rejects.toThrow(InvalidPathError);
+  });
+});
+
 describe("GitHubContentWriter.revert", () => {
   it("restores the previous content when the file was updated", async () => {
     const fetchImpl = createMockGitHubFetch(fixture);

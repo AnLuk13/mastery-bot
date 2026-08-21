@@ -12,7 +12,9 @@ import { createClearHandler } from "./handlers/clear";
 import { createDocumentCallbackHandler } from "./handlers/document";
 import { renderDirectory } from "./handlers/navigation";
 import {
+  createReorganizeConfirmHandler,
   createRevertHandler,
+  createSaveFromMessageHandler,
   createSaveHandler,
   isSaveClarifyContinuation,
   type ContentWriterLike,
@@ -86,12 +88,15 @@ export function createBot(options: CreateBotOptions): Bot {
     )(adaptContext(grammyCtx));
   });
 
-  const saveHandler = createSaveHandler({
+  const saveDeps = {
     editors: options.editors,
     contentProvider,
     contentWriter: options.contentWriter,
     groq: options.saveGroq,
-  });
+  };
+  const saveHandler = createSaveHandler(saveDeps);
+  const saveFromMessageHandler = createSaveFromMessageHandler(saveDeps);
+  const reorganizeConfirmHandler = createReorganizeConfirmHandler(saveDeps);
 
   bot.command("save", async (grammyCtx) => {
     await saveHandler(adaptContext(grammyCtx));
@@ -107,6 +112,7 @@ export function createBot(options: CreateBotOptions): Bot {
     options.askDeps,
     contentProvider,
     sessionStore,
+    options.editors,
   );
   bot.on("message:text", async (grammyCtx) => {
     const ctx = adaptContext(grammyCtx);
@@ -152,6 +158,15 @@ export function createBot(options: CreateBotOptions): Bot {
           privateFolders,
           sessionStore,
         )(ctx, decoded.path);
+        break;
+      case "save-answer":
+        await saveFromMessageHandler(ctx);
+        break;
+      case "reorganize-confirm":
+        await reorganizeConfirmHandler(ctx, true);
+        break;
+      case "reorganize-decline":
+        await reorganizeConfirmHandler(ctx, false);
         break;
       case "search-help":
         await handleSearchHelpCallback(ctx);

@@ -74,6 +74,34 @@ describe("decideSave", () => {
     );
   });
 
+  it("rejects a new file placed flat under the editor's folder, with no topic subfolder", async () => {
+    const groq = fakeGroq({
+      action: "write",
+      path: "antonio/meeting.md",
+      isNewFile: true,
+      content: "# Meeting",
+      commitMessage: "save: meeting",
+    });
+    await expect(decideSave(baseCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("does not require a topic subfolder for an existing-file (merge) decision", async () => {
+    const groq = fakeGroq({
+      action: "write",
+      path: "antonio/networking/dns.md",
+      isNewFile: false,
+      commitMessage: "save: dns update",
+    });
+    const decision = await decideSave(baseCtx, groq);
+    expect(decision).toMatchObject({
+      action: "write",
+      path: "antonio/networking/dns.md",
+      isNewFile: false,
+    });
+  });
+
   it("rejects a non-Markdown path", async () => {
     const groq = fakeGroq({
       action: "write",
@@ -102,6 +130,121 @@ describe("decideSave", () => {
   it("throws when the response doesn't match the decision schema", async () => {
     const groq = fakeGroq({ unexpected: true });
     await expect(decideSave(baseCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+});
+
+describe("decideSave reorganize", () => {
+  const flatCtx: SaveRequestContext = {
+    editorFolder: "andreea",
+    request: "add a note about tomorrow's sales call",
+    existingEntries: ["andreea/meeting.md"],
+    clarifyRound: 0,
+  };
+
+  it("accepts a reorganize decision that groups a new note with an existing flat file", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/meetings/kickoff.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "# Sales call\nTomorrow at 3pm.",
+      commitMessage: "save: sales call note",
+    });
+    const decision = await decideSave(flatCtx, groq);
+    expect(decision).toEqual({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/meetings/kickoff.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "# Sales call\nTomorrow at 3pm.",
+      commitMessage: "save: sales call note",
+    });
+  });
+
+  it("rejects a moveFrom that isn't one of the editor's actual existing documents", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/made-up.md",
+      moveTo: "andreea/meetings/kickoff.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "x",
+      commitMessage: "x",
+    });
+    await expect(decideSave(flatCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("rejects reorganizing a file that's already inside a topic subfolder", async () => {
+    const ctx: SaveRequestContext = {
+      ...flatCtx,
+      existingEntries: ["andreea/meetings/kickoff.md"],
+    };
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meetings/kickoff.md",
+      moveTo: "andreea/meetings/renamed.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "x",
+      commitMessage: "x",
+    });
+    await expect(decideSave(ctx, groq)).rejects.toThrow(GroqUnavailableError);
+  });
+
+  it("rejects a moveTo without a topic subfolder", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/renamed.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "x",
+      commitMessage: "x",
+    });
+    await expect(decideSave(flatCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("rejects a newPath without a topic subfolder", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/meetings/kickoff.md",
+      newPath: "andreea/sales-call.md",
+      content: "x",
+      commitMessage: "x",
+    });
+    await expect(decideSave(flatCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("rejects moveTo and newPath colliding on the same path", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/meetings/same.md",
+      newPath: "andreea/meetings/same.md",
+      content: "x",
+      commitMessage: "x",
+    });
+    await expect(decideSave(flatCtx, groq)).rejects.toThrow(
+      GroqUnavailableError,
+    );
+  });
+
+  it("rejects a reorganize proposal escaping the editor's folder via traversal", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/../someone-else/meetings/kickoff.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "x",
+      commitMessage: "x",
+    });
+    await expect(decideSave(flatCtx, groq)).rejects.toThrow(
       GroqUnavailableError,
     );
   });

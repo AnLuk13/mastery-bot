@@ -1,6 +1,8 @@
 import { isPathVisible, type ContentProvider } from "@/content";
+import type { EditorConfig } from "@/lib/env";
 import { answerQuestion, type AnswerQuestionDeps } from "@/rag/answerQuestion";
 import type { SessionStore } from "@/session";
+import { findEditorFolder } from "../auth";
 import { renderDocumentMessages } from "../formatting";
 import { buildAskResultKeyboard } from "../keyboards/ask";
 import type { BotContext } from "../types";
@@ -10,6 +12,7 @@ export function createAskHandler(
   deps: AnswerQuestionDeps,
   contentProvider: ContentProvider,
   sessionStore: SessionStore,
+  editors: readonly EditorConfig[],
 ) {
   return async (ctx: BotContext): Promise<void> => {
     const question = (ctx.messageText ?? "").trim();
@@ -57,7 +60,12 @@ export function createAskHandler(
         name: "",
         content: answer.text,
       });
-      const keyboard = buildAskResultKeyboard(answer.sources, answer.rateLimit);
+      const canSave = findEditorFolder(ctx.userId, editors) !== undefined;
+      const keyboard = buildAskResultKeyboard(
+        answer.sources,
+        canSave,
+        answer.rateLimit,
+      );
       const lastIndex = messages.length - 1;
 
       for (let i = 0; i < messages.length; i++) {

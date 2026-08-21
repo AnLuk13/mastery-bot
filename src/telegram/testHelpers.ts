@@ -37,6 +37,7 @@ export function createFakeBotContext(
     messageId: number;
     messageText: string;
     replyToMessageText: string;
+    callbackMessageText: string;
     document: {
       fileId: string;
       fileName: string;
@@ -58,6 +59,7 @@ export function createFakeBotContext(
     messageId: overrides.messageId,
     messageText: overrides.messageText,
     replyToMessageText: overrides.replyToMessageText,
+    callbackMessageText: overrides.callbackMessageText,
     document: overrides.document,
     downloadDocument:
       overrides.downloadDocument ??
@@ -111,12 +113,21 @@ export interface FakeContentWriter {
     content: string,
     message: string,
   ): Promise<{ path: string; beforeCommitSha: string }>;
+  delete(
+    path: string,
+    message: string,
+  ): Promise<{ path: string; beforeCommitSha: string }>;
   revert(path: string, beforeCommitSha: string, message: string): Promise<void>;
 }
 
 export interface RecordedWrite {
   path: string;
   content: string;
+  message: string;
+}
+
+export interface RecordedDelete {
+  path: string;
   message: string;
 }
 
@@ -130,21 +141,32 @@ export function createFakeContentWriter(
   overrides: Partial<{
     beforeCommitSha: string;
     onWrite: (write: RecordedWrite) => void;
+    onDelete: (del: RecordedDelete) => void;
     onRevert: (revert: RecordedRevert) => void;
   }> = {},
 ): {
   writer: FakeContentWriter;
   writes: RecordedWrite[];
+  deletes: RecordedDelete[];
   reverts: RecordedRevert[];
 } {
   const writes: RecordedWrite[] = [];
+  const deletes: RecordedDelete[] = [];
   const reverts: RecordedRevert[] = [];
+  let commitCounter = 0;
+  const nextSha = () =>
+    overrides.beforeCommitSha ?? `commit-${commitCounter++}`;
 
   const writer: FakeContentWriter = {
     async write(path, content, message) {
       writes.push({ path, content, message });
       overrides.onWrite?.({ path, content, message });
-      return { path, beforeCommitSha: overrides.beforeCommitSha ?? "commit-0" };
+      return { path, beforeCommitSha: nextSha() };
+    },
+    async delete(path, message) {
+      deletes.push({ path, message });
+      overrides.onDelete?.({ path, message });
+      return { path, beforeCommitSha: nextSha() };
     },
     async revert(path, beforeCommitSha, message) {
       reverts.push({ path, beforeCommitSha, message });
@@ -152,7 +174,7 @@ export function createFakeContentWriter(
     },
   };
 
-  return { writer, writes, reverts };
+  return { writer, writes, deletes, reverts };
 }
 
 export function createFakeSessionStore(

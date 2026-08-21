@@ -18,6 +18,8 @@ export interface BotContext {
   readonly messageText: string | undefined;
   /** Text of the message this one is a Telegram reply to, if any (used to detect a save-clarify follow-up). */
   readonly replyToMessageText: string | undefined;
+  /** Text of the message a callback button is attached to, when reached via a callback query (e.g. the "Save this" button on an /ask answer). Undefined for plain messages/commands, or if the message is too old for Telegram to include its text. */
+  readonly callbackMessageText: string | undefined;
   /** Present when the incoming message is a file upload. */
   readonly document:
     | { fileId: string; fileName: string; mimeType: string | undefined }

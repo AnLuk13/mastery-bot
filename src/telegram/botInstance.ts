@@ -18,6 +18,9 @@ const DISABLED_CONTENT_WRITER: ContentWriterLike = {
   async write() {
     throw new Error("No editors are configured (EDITORS is empty)");
   },
+  async delete() {
+    throw new Error("No editors are configured (EDITORS is empty)");
+  },
   async revert() {
     throw new Error("No editors are configured (EDITORS is empty)");
   },

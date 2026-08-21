@@ -5,13 +5,20 @@ import type { GroqClient } from "@/rag/groqClient";
 import { composeUpdate, decideSave } from "@/authoring/decideSave";
 import type { RevertTarget } from "../callbackData";
 import { findEditorFolder } from "../auth";
-import { buildSaveResultKeyboard } from "../keyboards/save";
+import {
+  buildReorganizeConfirmKeyboard,
+  buildReorganizeResultKeyboard,
+  buildSaveResultKeyboard,
+} from "../keyboards/save";
 import type { BotContext } from "../types";
 import {
   ACCESS_DENIED_MESSAGE,
   describeSaveError,
   extractClarifyContext,
+  extractReorganizeProposal,
   formatClarifyPrompt,
+  formatReorganizePrompt,
+  formatReorganizeSuccess,
   formatRevertSuccess,
   formatSaveSuccess,
   isClarifyContinuation,
@@ -19,10 +26,19 @@ import {
   UNSUPPORTED_SAVE_FILE_MESSAGE,
 } from "../userMessages";
 
+function basename(path: string): string {
+  const segments = path.split("/");
+  return segments[segments.length - 1];
+}
+
 export interface ContentWriterLike {
   write(
     path: string,
     content: string,
+    message: string,
+  ): Promise<{ path: string; beforeCommitSha: string }>;
+  delete(
+    path: string,
     message: string,
   ): Promise<{ path: string; beforeCommitSha: string }>;
   revert(path: string, beforeCommitSha: string, message: string): Promise<void>;
@@ -76,6 +92,79 @@ export function isSaveClarifyContinuation(ctx: BotContext): boolean {
   return isClarifyContinuation(ctx.replyToMessageText);
 }
 
+/** Writes a single file and reports success — the common tail of every non-reorganize save path. */
+async function writeAndReport(
+  ctx: BotContext,
+  deps: SaveDeps,
+  path: string,
+  content: string,
+  commitMessage: string,
+): Promise<void> {
+  const result = await deps.contentWriter.write(path, content, commitMessage);
+  const keyboard = buildSaveResultKeyboard(result.path, result.beforeCommitSha);
+  await ctx.sendMessage(formatSaveSuccess(result.path, content), keyboard);
+}
+
+/** Shared core of every save path: decide where the request belongs, merge or write it, and report the result. Never throws — errors are reported to the user as a safe message. */
+async function performSave(
+  ctx: BotContext,
+  deps: SaveDeps,
+  folder: string,
+  request: string,
+  clarifyRound: number,
+): Promise<void> {
+  await ctx.sendTyping();
+
+  try {
+    const existingEntries = await listEditorEntries(
+      deps.contentProvider,
+      folder,
+    );
+    const decision = await decideSave(
+      { editorFolder: folder, request, existingEntries, clarifyRound },
+      deps.groq,
+    );
+
+    if (decision.action === "clarify") {
+      await ctx.sendMessage(formatClarifyPrompt(decision.questions, request));
+      return;
+    }
+
+    if (decision.action === "reorganize") {
+      // Ask first — this only ever proposes the move; nothing writes or
+      // moves until the user taps Yes (see createReorganizeConfirmHandler).
+      await ctx.sendMessage(
+        formatReorganizePrompt(decision),
+        buildReorganizeConfirmKeyboard(),
+      );
+      return;
+    }
+
+    let content: string;
+    let commitMessage: string;
+    if (decision.isNewFile) {
+      // decideSave() guarantees content is set when isNewFile is true.
+      content = decision.content as string;
+      commitMessage = decision.commitMessage;
+    } else {
+      let existingContent = "";
+      try {
+        const doc = await deps.contentProvider.getDocument(decision.path);
+        existingContent = doc.content;
+      } catch (error) {
+        if (!(error instanceof ContentNotFoundError)) throw error;
+      }
+      const composed = await composeUpdate(existingContent, request, deps.groq);
+      content = composed.content;
+      commitMessage = composed.commitMessage;
+    }
+
+    await writeAndReport(ctx, deps, decision.path, content, commitMessage);
+  } catch (error) {
+    await ctx.sendMessage(describeSaveError(error));
+  }
+}
+
 export function createSaveHandler(deps: SaveDeps) {
   return async (ctx: BotContext): Promise<void> => {
     const folder = findEditorFolder(ctx.userId, deps.editors);
@@ -125,56 +214,132 @@ export function createSaveHandler(deps: SaveDeps) {
       clarifyRound = 0;
     }
 
-    await ctx.sendTyping();
+    await performSave(ctx, deps, folder, request, clarifyRound);
+  };
+}
+
+/**
+ * Handles a tap on an /ask answer's "Save this" button (see keyboards/ask.ts)
+ * — the one-tap fix for the confusing case where a user asks the bot to
+ * "edit" or "add" something conversationally, gets a fluent-sounding answer
+ * back, and assumes it was persisted when /ask never writes anything on its
+ * own. Sources its request from the tapped message's own text rather than a
+ * reply, since a button tap isn't a reply.
+ */
+export function createSaveFromMessageHandler(deps: SaveDeps) {
+  return async (ctx: BotContext): Promise<void> => {
+    // Acknowledge before any slow work, same as every other callback handler.
+    await ctx.answerCallbackQuery();
+
+    const folder = findEditorFolder(ctx.userId, deps.editors);
+    if (folder === undefined) {
+      await ctx.sendMessage(ACCESS_DENIED_MESSAGE);
+      return;
+    }
+
+    const request = ctx.callbackMessageText;
+    if (!request) {
+      await ctx.sendMessage(
+        "⚠️ That message is too old to save this way — reply to it with /save instead.",
+      );
+      return;
+    }
+
+    await performSave(ctx, deps, folder, request, 0);
+  };
+}
+
+/**
+ * Handles a tap on a reorganize proposal's Yes/No buttons (see
+ * userMessages.ts's formatReorganizePrompt). Confirming moves the existing
+ * flat file into its new topic folder and writes the new note; declining
+ * just writes the new note where it was headed anyway (already a proper
+ * topic subfolder — see decideSave's write-path validation) and leaves the
+ * old file untouched. Every path is re-validated against the CALLER's own
+ * folder here regardless of what the echoed proposal claims — that text
+ * round-tripped through a Telegram message and is untrusted input, same as
+ * callback_data.
+ */
+export function createReorganizeConfirmHandler(deps: SaveDeps) {
+  return async (ctx: BotContext, confirmed: boolean): Promise<void> => {
+    await ctx.answerCallbackQuery();
+
+    const folder = findEditorFolder(ctx.userId, deps.editors);
+    if (folder === undefined) {
+      await ctx.sendMessage(ACCESS_DENIED_MESSAGE);
+      return;
+    }
+
+    const proposal = ctx.callbackMessageText
+      ? extractReorganizeProposal(ctx.callbackMessageText)
+      : undefined;
+    if (!proposal) {
+      await ctx.sendMessage(
+        "⚠️ That proposal is no longer available — please /save again.",
+      );
+      return;
+    }
+    if (
+      !proposal.moveFrom.startsWith(`${folder}/`) ||
+      !proposal.moveTo.startsWith(`${folder}/`) ||
+      !proposal.newPath.startsWith(`${folder}/`)
+    ) {
+      await ctx.sendMessage(ACCESS_DENIED_MESSAGE);
+      return;
+    }
 
     try {
-      const existingEntries = await listEditorEntries(
-        deps.contentProvider,
-        folder,
-      );
-      const decision = await decideSave(
-        { editorFolder: folder, request, existingEntries, clarifyRound },
-        deps.groq,
-      );
-
-      if (decision.action === "clarify") {
-        await ctx.sendMessage(formatClarifyPrompt(decision.questions, request));
+      if (!confirmed) {
+        await writeAndReport(
+          ctx,
+          deps,
+          proposal.newPath,
+          proposal.content,
+          proposal.commitMessage,
+        );
         return;
       }
 
-      let content: string;
-      let commitMessage: string;
-      if (decision.isNewFile) {
-        // decideSave() guarantees content is set when isNewFile is true.
-        content = decision.content as string;
-        commitMessage = decision.commitMessage;
-      } else {
-        let existingContent = "";
-        try {
-          const doc = await deps.contentProvider.getDocument(decision.path);
-          existingContent = doc.content;
-        } catch (error) {
-          if (!(error instanceof ContentNotFoundError)) throw error;
-        }
-        const composed = await composeUpdate(
-          existingContent,
-          request,
-          deps.groq,
-        );
-        content = composed.content;
-        commitMessage = composed.commitMessage;
-      }
+      const newResult = await deps.contentWriter.write(
+        proposal.newPath,
+        proposal.content,
+        proposal.commitMessage,
+      );
+      const existingDoc = await deps.contentProvider.getDocument(
+        proposal.moveFrom,
+      );
+      const moveMessage = `reorganize: move ${proposal.moveFrom} to ${proposal.moveTo}`;
+      const moveResult = await deps.contentWriter.write(
+        proposal.moveTo,
+        existingDoc.content,
+        moveMessage,
+      );
+      const deleteResult = await deps.contentWriter.delete(
+        proposal.moveFrom,
+        moveMessage,
+      );
 
-      const result = await deps.contentWriter.write(
-        decision.path,
-        content,
-        commitMessage,
-      );
-      const keyboard = buildSaveResultKeyboard(
-        result.path,
-        result.beforeCommitSha,
-      );
-      await ctx.sendMessage(formatSaveSuccess(result.path, content), keyboard);
+      const keyboard = buildReorganizeResultKeyboard([
+        {
+          label: basename(newResult.path),
+          path: newResult.path,
+          beforeCommitSha: newResult.beforeCommitSha,
+          viewable: true,
+        },
+        {
+          label: basename(moveResult.path),
+          path: moveResult.path,
+          beforeCommitSha: moveResult.beforeCommitSha,
+          viewable: true,
+        },
+        {
+          label: `restore ${basename(deleteResult.path)}`,
+          path: deleteResult.path,
+          beforeCommitSha: deleteResult.beforeCommitSha,
+          viewable: false,
+        },
+      ]);
+      await ctx.sendMessage(formatReorganizeSuccess(proposal), keyboard);
     } catch (error) {
       await ctx.sendMessage(describeSaveError(error));
     }

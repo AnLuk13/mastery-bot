@@ -31,9 +31,27 @@ const writeSchema = z.object({
   commitMessage: z.string().min(1),
 });
 
+// Proposes grouping a genuinely new, related note together with an existing
+// flat file (one with no topic subfolder yet) rather than leaving them split
+// across two locations. Never executed directly — decideSave() only ever
+// *proposes* this; the caller shows it to the user for confirmation before
+// anything moves (see save.ts's reorganize-confirm flow).
+const reorganizeSchema = z.object({
+  action: z.literal("reorganize"),
+  /** The existing flat file to move. */
+  moveFrom: z.string().min(1),
+  /** Where that existing file should live once grouped into a topic subfolder. */
+  moveTo: z.string().min(1),
+  /** Where the new note should live, inside that same subfolder. */
+  newPath: z.string().min(1),
+  content: z.string().min(1),
+  commitMessage: z.string().min(1),
+});
+
 const decisionSchema = z.discriminatedUnion("action", [
   clarifySchema,
   writeSchema,
+  reorganizeSchema,
 ]);
 
 export type SaveDecision = z.infer<typeof decisionSchema>;

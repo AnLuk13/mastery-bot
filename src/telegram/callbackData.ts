@@ -34,6 +34,11 @@ const COMMIT_SHA_ABBREV_LENGTH = 12;
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{6,40}$/;
 export const SEARCH_HELP_CALLBACK_DATA = "s";
 export const TOO_LONG_CALLBACK_DATA = "x";
+/** No payload: the handler reads the tapped message's own text (BotContext.callbackMessageText) rather than anything encoded here. */
+export const SAVE_ANSWER_CALLBACK_DATA = "a";
+/** No payload, same reasoning as above: the pending reorganize proposal rides in the confirm/decline message's own text. */
+export const REORGANIZE_CONFIRM_CALLBACK_DATA = "y";
+export const REORGANIZE_DECLINE_CALLBACK_DATA = "n";
 
 export interface CleanupHint {
   /** message_id of the first extra message to delete (a consecutive run of `count` messages). */
@@ -53,6 +58,9 @@ export type DecodedCallback =
   | { type: "search-help" }
   | { type: "limits"; rateLimit: RateLimitInfo }
   | { type: "revert"; target: RevertTarget }
+  | { type: "save-answer" }
+  | { type: "reorganize-confirm" }
+  | { type: "reorganize-decline" }
   | { type: "too-long" }
   | { type: "invalid" };
 
@@ -120,6 +128,13 @@ export function encodeRevertCallbackData(
 export function decodeCallbackData(data: string): DecodedCallback {
   if (data === SEARCH_HELP_CALLBACK_DATA) return { type: "search-help" };
   if (data === TOO_LONG_CALLBACK_DATA) return { type: "too-long" };
+  if (data === SAVE_ANSWER_CALLBACK_DATA) return { type: "save-answer" };
+  if (data === REORGANIZE_CONFIRM_CALLBACK_DATA) {
+    return { type: "reorganize-confirm" };
+  }
+  if (data === REORGANIZE_DECLINE_CALLBACK_DATA) {
+    return { type: "reorganize-decline" };
+  }
 
   if (data.startsWith(DOCUMENT_PREFIX)) {
     return decodePath("document", data.slice(DOCUMENT_PREFIX.length));

@@ -6,6 +6,9 @@ import {
   encodeRevertCallbackData,
   isCallbackDataTooLarge,
   MAX_CALLBACK_DATA_BYTES,
+  REORGANIZE_CONFIRM_CALLBACK_DATA,
+  REORGANIZE_DECLINE_CALLBACK_DATA,
+  SAVE_ANSWER_CALLBACK_DATA,
   SEARCH_HELP_CALLBACK_DATA,
   TOO_LONG_CALLBACK_DATA,
 } from "./callbackData";
@@ -95,6 +98,21 @@ describe("decodeCallbackData", () => {
   it("decodes the search-help sentinel", () => {
     expect(decodeCallbackData(SEARCH_HELP_CALLBACK_DATA)).toEqual({
       type: "search-help",
+    });
+  });
+
+  it("decodes the save-answer sentinel", () => {
+    expect(decodeCallbackData(SAVE_ANSWER_CALLBACK_DATA)).toEqual({
+      type: "save-answer",
+    });
+  });
+
+  it("decodes the reorganize confirm/decline sentinels", () => {
+    expect(decodeCallbackData(REORGANIZE_CONFIRM_CALLBACK_DATA)).toEqual({
+      type: "reorganize-confirm",
+    });
+    expect(decodeCallbackData(REORGANIZE_DECLINE_CALLBACK_DATA)).toEqual({
+      type: "reorganize-decline",
     });
   });
 

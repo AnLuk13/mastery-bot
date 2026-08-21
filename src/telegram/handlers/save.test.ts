@@ -7,7 +7,9 @@ import {
   createFakeContentWriter,
 } from "../testHelpers";
 import {
+  createReorganizeConfirmHandler,
   createRevertHandler,
+  createSaveFromMessageHandler,
   createSaveHandler,
   isSaveClarifyContinuation,
   type SaveDeps,
@@ -320,6 +322,226 @@ describe("createSaveHandler", () => {
 
     await createSaveHandler(baseDeps({ contentProvider, groq }))(ctx);
     expect(sendMessageCalls[0].text).toMatch(/something went wrong/i);
+  });
+});
+
+/** listDirectory result decideSave needs to see "antonio/meeting.md" as an existing (flat) document. */
+function contentProviderWithFlatMeeting(
+  overrides: Partial<Parameters<typeof createFakeContentProvider>[0]> = {},
+) {
+  return createFakeContentProvider({
+    listDirectory: async () => [
+      { type: "document", name: "meeting.md", path: "antonio/meeting.md" },
+    ],
+    ...overrides,
+  });
+}
+
+describe("createSaveHandler reorganize proposal", () => {
+  it("sends an ask-first confirmation instead of writing anything, when decideSave proposes a reorganize", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const groq = fakeGroqReturning({
+      action: "reorganize",
+      moveFrom: "antonio/meeting.md",
+      moveTo: "antonio/meetings/kickoff.md",
+      newPath: "antonio/meetings/sales-call.md",
+      content: "# Sales call",
+      commitMessage: "save: sales call",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "add a note about tomorrow's sales call",
+    });
+
+    await createSaveHandler(
+      baseDeps({
+        contentWriter: writer,
+        contentProvider: contentProviderWithFlatMeeting(),
+        groq,
+      }),
+    )(ctx);
+
+    expect(writes).toHaveLength(0);
+    expect(deletes).toHaveLength(0);
+    expect(sendMessageCalls[0].text).toContain("antonio/meeting.md");
+    expect(sendMessageCalls[0].keyboard?.inline_keyboard.flat()).toContainEqual(
+      expect.objectContaining({ text: "✅ Yes, reorganize" }),
+    );
+  });
+});
+
+describe("createReorganizeConfirmHandler", () => {
+  async function proposeReorganize(
+    overrides: Partial<SaveDeps> = {},
+  ): Promise<string> {
+    const groq = fakeGroqReturning({
+      action: "reorganize",
+      moveFrom: "antonio/meeting.md",
+      moveTo: "antonio/meetings/kickoff.md",
+      newPath: "antonio/meetings/sales-call.md",
+      content: "# Sales call\nTomorrow at 3pm.",
+      commitMessage: "save: sales call",
+    });
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      commandArgs: "add a note about tomorrow's sales call",
+    });
+    await createSaveHandler(
+      baseDeps({
+        contentProvider: contentProviderWithFlatMeeting(),
+        ...overrides,
+        groq,
+      }),
+    )(ctx);
+    return sendMessageCalls[0].text;
+  }
+
+  it("confirming moves the existing flat file and writes the new note", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const contentProvider = contentProviderWithFlatMeeting({
+      getDocument: async () => ({
+        path: "antonio/meeting.md",
+        name: "meeting.md",
+        content: "# Meeting\nOriginal notes.",
+      }),
+    });
+    const proposalText = await proposeReorganize({
+      contentWriter: writer,
+      contentProvider,
+    });
+
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: proposalText,
+    });
+    await createReorganizeConfirmHandler(
+      baseDeps({ contentWriter: writer, contentProvider }),
+    )(ctx, true);
+
+    expect(writes.map((w) => w.path)).toEqual([
+      "antonio/meetings/sales-call.md",
+      "antonio/meetings/kickoff.md",
+    ]);
+    expect(writes[0].content).toBe("# Sales call\nTomorrow at 3pm.");
+    expect(writes[1].content).toBe("# Meeting\nOriginal notes.");
+    expect(deletes).toHaveLength(1);
+    expect(deletes[0].path).toBe("antonio/meeting.md");
+
+    expect(sendMessageCalls[0].text).toContain(
+      "antonio/meetings/sales-call.md",
+    );
+    expect(sendMessageCalls[0].text).toContain("antonio/meeting.md");
+    expect(sendMessageCalls[0].text).toContain("antonio/meetings/kickoff.md");
+    const undoButtons = (
+      sendMessageCalls[0].keyboard?.inline_keyboard.flat() ?? []
+    ).filter((b) => b.text.startsWith("↩️ Undo"));
+    expect(undoButtons).toHaveLength(3);
+  });
+
+  it("declining just writes the new note, leaving the existing flat file untouched", async () => {
+    const { writer, writes, deletes } = createFakeContentWriter();
+    const contentProvider = contentProviderWithFlatMeeting();
+    const proposalText = await proposeReorganize({
+      contentWriter: writer,
+      contentProvider,
+    });
+
+    const { ctx } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: proposalText,
+    });
+    await createReorganizeConfirmHandler(
+      baseDeps({ contentWriter: writer, contentProvider }),
+    )(ctx, false);
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0].path).toBe("antonio/meetings/sales-call.md");
+    expect(deletes).toHaveLength(0);
+  });
+
+  it("acknowledges the callback immediately", async () => {
+    const proposalText = await proposeReorganize();
+    const { ctx, answerCallbackQueryCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: proposalText,
+    });
+
+    await createReorganizeConfirmHandler(baseDeps())(ctx, false);
+
+    expect(answerCallbackQueryCalls).toHaveLength(1);
+  });
+
+  it("denies a non-editor", async () => {
+    const proposalText = await proposeReorganize();
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 999,
+      callbackMessageText: proposalText,
+    });
+
+    await createReorganizeConfirmHandler(baseDeps())(ctx, true);
+
+    expect(sendMessageCalls[0].text).toMatch(/private bot/i);
+  });
+
+  it("shows a friendly message when there's no pending proposal to recover", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackMessageText: "just an ordinary message",
+    });
+
+    await createReorganizeConfirmHandler(baseDeps())(ctx, true);
+
+    expect(sendMessageCalls[0].text).toMatch(/no longer available/i);
+  });
+
+  it("shows a friendly message when there's no callback message text at all", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+    });
+
+    await createReorganizeConfirmHandler(baseDeps())(ctx, true);
+
+    expect(sendMessageCalls[0].text).toMatch(/no longer available/i);
+  });
+});
+
+describe("createSaveFromMessageHandler", () => {
+  it("saves the tapped message's own text, acknowledging the callback first", async () => {
+    const { writer, writes } = createFakeContentWriter();
+    const { ctx, answerCallbackQueryCalls } = createFakeBotContext({
+      userId: 712059530,
+      callbackData: "a",
+      callbackMessageText: "TCP keepalive should be checked on the LB.",
+    });
+
+    await createSaveFromMessageHandler(baseDeps({ contentWriter: writer }))(
+      ctx,
+    );
+
+    expect(answerCallbackQueryCalls).toHaveLength(1);
+    expect(writes).toHaveLength(1);
+    expect(writes[0].path).toBe("antonio/networking/keepalive.md");
+  });
+
+  it("denies a non-editor", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 999,
+      callbackMessageText: "some answer text",
+    });
+
+    await createSaveFromMessageHandler(baseDeps())(ctx);
+
+    expect(sendMessageCalls[0].text).toMatch(/private bot/i);
+  });
+
+  it("shows a friendly message when the tapped message is too old to carry its text", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 712059530,
+    });
+
+    await createSaveFromMessageHandler(baseDeps())(ctx);
+
+    expect(sendMessageCalls[0].text).toMatch(/too old/i);
   });
 });
 

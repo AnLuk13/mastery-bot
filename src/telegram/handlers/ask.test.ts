@@ -3,6 +3,7 @@ import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import { GroqUnavailableError } from "@/rag/errors";
 import type { EmbeddingsIndex } from "@/rag/types";
 import type { Document } from "@/content";
+import type { EditorConfig } from "@/lib/env";
 import {
   createFakeBotContext,
   createFakeContentProvider,
@@ -22,6 +23,8 @@ const index: EmbeddingsIndex = {
     },
   ],
 };
+
+const editors: EditorConfig[] = [{ userId: 1, folder: "andreea" }];
 
 function makeDeps(
   overrides: Partial<AnswerQuestionDeps> = {},
@@ -50,6 +53,7 @@ describe("createAskHandler", () => {
       makeDeps(),
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     expect(sendTypingCalls).toHaveLength(1);
@@ -77,6 +81,7 @@ describe("createAskHandler", () => {
       makeDeps({ embed: async () => [0.1, 0.1] }),
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     expect(sendMessageCalls[0].keyboard?.inline_keyboard).toEqual([
@@ -107,6 +112,7 @@ describe("createAskHandler", () => {
       deps,
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     const rows = sendMessageCalls[0].keyboard?.inline_keyboard;
@@ -123,6 +129,7 @@ describe("createAskHandler", () => {
       makeDeps(),
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     expect(sendMessageCalls).toHaveLength(0);
@@ -138,6 +145,7 @@ describe("createAskHandler", () => {
       makeDeps(),
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     expect(sendMessageCalls).toHaveLength(0);
@@ -165,6 +173,7 @@ describe("createAskHandler", () => {
       deps,
       createFakeContentProvider(),
       sessionStore,
+      [],
     )(ctx);
 
     const prompt = JSON.stringify(capturedMessages);
@@ -196,6 +205,7 @@ describe("createAskHandler", () => {
       deps,
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     const prompt = JSON.stringify(capturedMessages);
@@ -228,7 +238,7 @@ describe("createAskHandler", () => {
       messageText: "summarize this",
     });
 
-    await createAskHandler(deps, provider, sessionStore)(ctx);
+    await createAskHandler(deps, provider, sessionStore, [])(ctx);
 
     const prompt = JSON.stringify(capturedMessages);
     expect(prompt).toContain("Full document content about embeddings");
@@ -260,7 +270,7 @@ describe("createAskHandler", () => {
       messageText: "summarize this",
     });
 
-    await createAskHandler(deps, provider, sessionStore)(ctx);
+    await createAskHandler(deps, provider, sessionStore, [])(ctx);
 
     const prompt = JSON.stringify(capturedMessages);
     expect(prompt).not.toContain("Should never be seen by user 1");
@@ -283,9 +293,44 @@ describe("createAskHandler", () => {
       deps,
       createFakeContentProvider(),
       createFakeSessionStore(),
+      [],
     )(ctx);
 
     expect(sendMessageCalls).toHaveLength(1);
     expect(sendMessageCalls[0].text).toMatch(/couldn't get an answer/i);
+  });
+
+  it("adds a Save-this button when the asker is a registered editor", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 1,
+      messageText: "what are embeddings?",
+    });
+
+    await createAskHandler(
+      makeDeps(),
+      createFakeContentProvider(),
+      createFakeSessionStore(),
+      editors,
+    )(ctx);
+
+    const rows = sendMessageCalls[0].keyboard?.inline_keyboard;
+    expect(rows?.some((row) => row[0]?.text === "💾 Save this")).toBe(true);
+  });
+
+  it("omits the Save-this button for a non-editor", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 999,
+      messageText: "what are embeddings?",
+    });
+
+    await createAskHandler(
+      makeDeps(),
+      createFakeContentProvider(),
+      createFakeSessionStore(),
+      editors,
+    )(ctx);
+
+    const rows = sendMessageCalls[0].keyboard?.inline_keyboard;
+    expect(rows?.some((row) => row[0]?.text === "💾 Save this")).toBe(false);
   });
 });

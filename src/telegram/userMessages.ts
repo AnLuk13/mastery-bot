@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   ContentNotFoundError,
   ContentProviderAuthError,
@@ -145,9 +146,70 @@ export function extractClarifyContext(replyToMessageText: string): string {
     : replyToMessageText.slice(index + SAVE_CONTEXT_MARKER.length).trim();
 }
 
+const REORGANIZE_MARKER = "⎯⎯⎯ reorganize-proposal (do not edit) ⎯⎯⎯";
+
+const reorganizeProposalSchema = z.object({
+  moveFrom: z.string().min(1),
+  moveTo: z.string().min(1),
+  newPath: z.string().min(1),
+  content: z.string().min(1),
+  commitMessage: z.string().min(1),
+});
+
+export type ReorganizeProposal = z.infer<typeof reorganizeProposalSchema>;
+
+/**
+ * The ask-first confirmation prompt for a proposed reorganize: readable text
+ * plus the full proposal riding along in a marker block, the same
+ * no-server-state trick as the clarify flow — except recovered from the
+ * confirm/decline BUTTON's own message text (BotContext.callbackMessageText)
+ * rather than a reply, since confirming is a tap, not a reply.
+ */
+export function formatReorganizePrompt(proposal: ReorganizeProposal): string {
+  const topicFolder = proposal.moveTo.slice(
+    0,
+    proposal.moveTo.lastIndexOf("/"),
+  );
+  return `📁 This looks related to your existing ${proposal.moveFrom} — want me to group them under ${topicFolder}/?\n\n${REORGANIZE_MARKER}\n${JSON.stringify(proposal)}`;
+}
+
+/** True when `callbackMessageText` is one of our own reorganize proposals. */
+export function isReorganizeProposal(
+  callbackMessageText: string | undefined,
+): boolean {
+  return (
+    callbackMessageText !== undefined &&
+    callbackMessageText.includes(REORGANIZE_MARKER)
+  );
+}
+
+/** Recovers the pending proposal from the confirm/decline message's own text. Returns undefined if missing or malformed — e.g. the message predates this feature. */
+export function extractReorganizeProposal(
+  callbackMessageText: string,
+): ReorganizeProposal | undefined {
+  const index = callbackMessageText.indexOf(REORGANIZE_MARKER);
+  if (index === -1) return undefined;
+  const raw = callbackMessageText
+    .slice(index + REORGANIZE_MARKER.length)
+    .trim();
+  try {
+    return reorganizeProposalSchema.parse(JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
 export function formatSaveSuccess(path: string, content: string): string {
   const preview = content.length > 300 ? `${content.slice(0, 300)}…` : content;
   return `✅ Saved to ${path}\n\n${preview}`;
+}
+
+export function formatReorganizeSuccess(proposal: ReorganizeProposal): string {
+  const preview =
+    proposal.content.length > 300
+      ? `${proposal.content.slice(0, 300)}…`
+      : proposal.content;
+  return `✅ Saved to ${proposal.newPath}, and moved ${proposal.moveFrom} to ${proposal.moveTo}.\n\n${preview}`;
 }
 
 export function formatRevertSuccess(path: string): string {
