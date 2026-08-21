@@ -8,15 +8,11 @@ name: Reindex embeddings and deploy
 # runs on a schedule instead — no code change needed to pick up new/edited
 # notes, just a bounded delay.
 on:
-  # Schedule TEMPORARILY DISABLED — a reindex from this workflow deployed an
-  # embeddings index whose growth (555 -> 733 chunks) correlated exactly with
-  # production going down (every request 500ing, even /start, no logged
-  # request — consistent with a cold-start/init failure). Re-enable the
-  # schedule below once the actual cause is confirmed and fixed; until then
-  # this only runs when triggered manually, so it can't silently repeat the
-  # outage. See antonio/mastery-bot/08-lessons-and-bugs.md once documented.
-  # schedule:
-  #   - cron: "*/30 * * * *"
+  schedule:
+    # Every 30 minutes. Adjust freely — a personal, low-volume knowledge
+    # base doesn't need faster than this, and a no-op run (nothing changed)
+    # costs almost nothing.
+    - cron: "*/30 * * * *"
   workflow_dispatch: {} # manual "run now" from the Actions tab
 
 permissions:
@@ -74,3 +70,32 @@ jobs:
       - name: Trigger a Vercel production deploy
         if: steps.diff.outputs.changed == 'true'
         run: curl -fsS -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
+
+      # A deploy hook is fire-and-forget: it kicks off a build but doesn't
+      # wait for or report on the result. A bad deploy going live silently
+      # for up to 30 minutes (until the next scheduled run happens to
+      # overwrite it) is exactly what happened once already — this makes
+      # that loud instead of silent by polling the live webhook route until
+      # it's healthy (a GET is expected to 405, meaning the function booted
+      # and handled the request; anything else — including a hung/500
+      # deployment — means it isn't) or failing the job after a bounded
+      # wait, which surfaces as a normal GitHub Actions failure
+      # notification. It does not attempt to auto-rollback: see
+      # antonio/mastery-bot/08-lessons-and-bugs.md for the manual rollback
+      # steps (`vercel rollback <known-good-url>`), which are fast and don't
+      # need a broader, more sensitive Vercel API token than this workflow
+      # already has.
+      - name: Verify the new deployment is healthy
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          for i in $(seq 1 18); do
+            sleep 10
+            status=$(curl -s -o /dev/null -w "%{http_code}" https://mastery-bot.vercel.app/api/telegram/webhook)
+            echo "Attempt $i: GET /api/telegram/webhook -> $status"
+            if [ "$status" = "405" ]; then
+              echo "Healthy (405 Method Not Allowed on GET is the expected response)."
+              exit 0
+            fi
+          done
+          echo "::error::The new deployment did not become healthy within 3 minutes (last status: $status). It is likely live and broken right now — see antonio/mastery-bot/08-lessons-and-bugs.md for how to roll back manually."
+          exit 1
