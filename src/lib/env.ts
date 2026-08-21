@@ -114,7 +114,14 @@ const baseSchema = z.object({
   GITHUB_CONTENT_PATH: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GROQ_API_KEY: z.string().min(1, "is required"),
+  // Used for /save's structured decisions (needs JSON mode + reasoning_effort).
   GROQ_MODEL: z.string().min(1).default("openai/gpt-oss-120b"),
+  // Used for /ask. Defaults to a Groq "compound" model: an agentic model that
+  // decides on its own when to run a live web search, giving /ask real
+  // internet access with no separate search API to wire up. Verified live
+  // that compound models reject reasoning_effort outright, so keep this
+  // separate from GROQ_MODEL rather than reusing one client for both.
+  GROQ_ASK_MODEL: z.string().min(1).default("groq/compound-mini"),
   EDITORS: editorsSchema,
   PRIVATE_FOLDERS: privateFoldersSchema,
 });

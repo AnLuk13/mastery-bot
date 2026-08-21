@@ -74,6 +74,11 @@ describe("parseEnv", () => {
     expect(env.GROQ_MODEL).toBe("openai/gpt-oss-120b");
   });
 
+  it("defaults GROQ_ASK_MODEL when not set", () => {
+    const env = parseEnv(baseValidLocalEnv);
+    expect(env.GROQ_ASK_MODEL).toBe("groq/compound-mini");
+  });
+
   it("defaults EDITORS to an empty array when not set", () => {
     const env = parseEnv(baseValidLocalEnv);
     expect(env.EDITORS).toEqual([]);

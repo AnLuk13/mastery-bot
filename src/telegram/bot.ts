@@ -2,6 +2,7 @@ import { Bot, type BotConfig, type Context } from "grammy";
 import type { ContentProvider, PrivateFolderConfig } from "@/content";
 import type { EditorConfig } from "@/lib/env";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
+import type { GroqClient } from "@/rag/groqClient";
 import { adaptContext } from "./adapter";
 import { enforceAuthorization } from "./auth";
 import { decodeCallbackData } from "./callbackData";
@@ -34,6 +35,8 @@ export interface CreateBotOptions {
   askDeps: AnswerQuestionDeps;
   editors: readonly EditorConfig[];
   contentWriter: ContentWriterLike;
+  /** /save's model client — deliberately separate from askDeps.groq: /ask and /save use different Groq models with different capabilities. */
+  saveGroq: Pick<GroqClient, "createChatCompletion">;
   privateFolders: readonly PrivateFolderConfig[];
   /** Pass to skip grammY's getMe network call, e.g. in tests. */
   botInfo?: BotConfig<Context>["botInfo"];
@@ -82,7 +85,7 @@ export function createBot(options: CreateBotOptions): Bot {
     editors: options.editors,
     contentProvider,
     contentWriter: options.contentWriter,
-    groq: options.askDeps.groq,
+    groq: options.saveGroq,
   });
 
   bot.command("save", async (grammyCtx) => {

@@ -37,6 +37,17 @@ export interface ChatCompletionResult {
   rateLimit: RateLimitInfo | undefined;
 }
 
+export interface ChatCompletionOptions {
+  /**
+   * Omit entirely for Groq's agentic "compound" models — verified live that
+   * they reject this field outright (400 "not supported with this model"),
+   * unlike temperature/max_tokens which both models accept fine.
+   */
+  reasoningEffort?: "low" | "medium" | "high";
+  /** Structured-output mode; only meaningful for models built to follow a JSON schema (not the compound models). */
+  jsonMode?: boolean;
+}
+
 function parseRateLimitHeader(
   headers: Headers,
   name: string,
@@ -87,7 +98,26 @@ export class GroqClient {
 
   async createChatCompletion(
     messages: ChatMessage[],
+    options: ChatCompletionOptions = {},
   ): Promise<ChatCompletionResult> {
+    const body: Record<string, unknown> = {
+      model: this.model,
+      messages,
+      temperature: 0.2,
+      // Keeps answers well under Telegram's 4096-char single-message limit.
+      max_tokens: 700,
+    };
+    if (options.reasoningEffort) {
+      // A reasoning model (openai/gpt-oss-*) spends part of max_tokens on a
+      // hidden reasoning pass before the visible answer; without capping its
+      // effort, that pass alone can exhaust the budget and leave `content`
+      // empty. Only pass this for models that accept it (see the option's doc).
+      body.reasoning_effort = options.reasoningEffort;
+    }
+    if (options.jsonMode) {
+      body.response_format = { type: "json_object" };
+    }
+
     let response: Response;
     try {
       response = await this.fetchImpl(`${GROQ_API_BASE}/chat/completions`, {
@@ -96,19 +126,7 @@ export class GroqClient {
           "Content-Type": "application/json",
           Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({
-          model: this.model,
-          messages,
-          temperature: 0.2,
-          // Keeps answers well under Telegram's 4096-char single-message limit.
-          max_tokens: 700,
-          // Groq's current default models (openai/gpt-oss-*) spend part of
-          // max_tokens on a hidden reasoning pass before the visible answer;
-          // without capping its effort, that pass alone can exhaust the
-          // budget and leave `content` empty. Ignored by non-reasoning
-          // models, so this is safe if GROQ_MODEL is changed.
-          reasoning_effort: "low",
-        }),
+        body: JSON.stringify(body),
       });
     } catch {
       throw new GroqUnavailableError("Network error while contacting Groq");

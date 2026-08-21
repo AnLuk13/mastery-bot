@@ -17,6 +17,21 @@ function failingFetch() {
   };
 }
 
+/** Captures the outgoing request body so tests can assert exactly what was sent. */
+function capturingFetch(capturedBodies: unknown[]): typeof fetch {
+  const impl = async (
+    _input: RequestInfo | URL,
+    init?: RequestInit,
+  ): Promise<Response> => {
+    capturedBodies.push(JSON.parse(String(init?.body)));
+    return new Response(
+      JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+      { status: 200 },
+    );
+  };
+  return impl as typeof fetch;
+}
+
 describe("GroqClient.createChatCompletion", () => {
   it("returns the completion text on success", async () => {
     const client = new GroqClient({
@@ -132,6 +147,55 @@ describe("GroqClient.createChatCompletion", () => {
     await expect(
       client.createChatCompletion([{ role: "user", content: "hi" }]),
     ).rejects.toThrow(GroqUnavailableError);
+  });
+
+  it("omits reasoning_effort and response_format by default (compound models reject reasoning_effort outright)", async () => {
+    const bodies: unknown[] = [];
+    const client = new GroqClient({
+      apiKey: "test-key",
+      model: "groq/compound-mini",
+      fetchImpl: capturingFetch(bodies),
+    });
+
+    await client.createChatCompletion([{ role: "user", content: "hi" }]);
+
+    const body = bodies[0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("reasoning_effort");
+    expect(body).not.toHaveProperty("response_format");
+    expect(body.temperature).toBe(0.2);
+    expect(body.max_tokens).toBe(700);
+  });
+
+  it("includes reasoning_effort when requested", async () => {
+    const bodies: unknown[] = [];
+    const client = new GroqClient({
+      apiKey: "test-key",
+      model: "test-model",
+      fetchImpl: capturingFetch(bodies),
+    });
+
+    await client.createChatCompletion([{ role: "user", content: "hi" }], {
+      reasoningEffort: "low",
+    });
+
+    expect((bodies[0] as Record<string, unknown>).reasoning_effort).toBe("low");
+  });
+
+  it("includes response_format json_object when jsonMode is requested", async () => {
+    const bodies: unknown[] = [];
+    const client = new GroqClient({
+      apiKey: "test-key",
+      model: "test-model",
+      fetchImpl: capturingFetch(bodies),
+    });
+
+    await client.createChatCompletion([{ role: "user", content: "hi" }], {
+      jsonMode: true,
+    });
+
+    expect((bodies[0] as Record<string, unknown>).response_format).toEqual({
+      type: "json_object",
+    });
   });
 
   it("throws GroqUnavailableError on a 401", async () => {

@@ -50,7 +50,10 @@ async function callGroqJson(
   groq: GroqLike,
   messages: ChatMessage[],
 ): Promise<unknown> {
-  const { text } = await groq.createChatCompletion(messages);
+  const { text } = await groq.createChatCompletion(messages, {
+    reasoningEffort: "low",
+    jsonMode: true,
+  });
   try {
     return JSON.parse(text);
   } catch {

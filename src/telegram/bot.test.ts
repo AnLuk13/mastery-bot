@@ -49,6 +49,7 @@ describe("createBot", () => {
       contentProvider: createFakeContentProvider(),
       allowedUserIds: [1],
       askDeps: fakeAskDeps,
+      saveGroq: new GroqClient({ apiKey: "test-key", model: "test-model" }),
       editors: [],
       contentWriter: createFakeContentWriter().writer,
       privateFolders: [],

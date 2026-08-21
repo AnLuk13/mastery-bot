@@ -36,12 +36,19 @@ function getBot(): Bot {
       askDeps: {
         embed: embedText,
         index: getEmbeddingsIndex(),
+        // A Groq "compound" model, agentic and with live web search built in
+        // — distinct from GROQ_MODEL below, which /save needs for structured
+        // JSON output that compound models don't support.
         groq: new GroqClient({
           apiKey: env.GROQ_API_KEY,
-          model: env.GROQ_MODEL,
+          model: env.GROQ_ASK_MODEL,
         }),
         privateFolders: env.PRIVATE_FOLDERS,
       },
+      saveGroq: new GroqClient({
+        apiKey: env.GROQ_API_KEY,
+        model: env.GROQ_MODEL,
+      }),
       editors: env.EDITORS,
       privateFolders: env.PRIVATE_FOLDERS,
       // /save always writes to GitHub directly regardless of CONTENT_PROVIDER
