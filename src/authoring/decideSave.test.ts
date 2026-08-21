@@ -163,6 +163,25 @@ describe("decideSave reorganize", () => {
     });
   });
 
+  it("degrades a reorganize decision into a plain write on round 2, instead of proposing a second confirmation step", async () => {
+    const groq = fakeGroq({
+      action: "reorganize",
+      moveFrom: "andreea/meeting.md",
+      moveTo: "andreea/meetings/kickoff.md",
+      newPath: "andreea/meetings/sales-call.md",
+      content: "# Sales call\nTomorrow at 3pm.",
+      commitMessage: "save: sales call note",
+    });
+    const decision = await decideSave({ ...flatCtx, clarifyRound: 1 }, groq);
+    expect(decision).toEqual({
+      action: "write",
+      path: "andreea/meetings/sales-call.md",
+      isNewFile: true,
+      content: "# Sales call\nTomorrow at 3pm.",
+      commitMessage: "save: sales call note",
+    });
+  });
+
   it("rejects a moveFrom that isn't one of the editor's actual existing documents", async () => {
     const groq = fakeGroq({
       action: "reorganize",

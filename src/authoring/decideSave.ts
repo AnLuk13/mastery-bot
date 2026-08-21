@@ -18,7 +18,7 @@ type GroqLike = Pick<GroqClient, "createChatCompletion">;
 function decideSystemPrompt(ctx: SaveRequestContext): string {
   const roundNote =
     ctx.clarifyRound > 0
-      ? 'This is the second attempt: you already asked a clarifying question. You MUST return "write" this time — make your best reasonable guess rather than asking again.'
+      ? 'This is the second attempt: you already asked a clarifying question and the user answered it. You MUST return "write" this time — never "clarify" again, and never "reorganize" either, even if the answer mentions restructuring or grouping notes together. The user has already been through one extra round; a "reorganize" decision means yet another confirmation step, which defeats the point. If restructuring genuinely seems warranted, just write the new note into the best topic subfolder you can — do not propose moving anything.'
       : "This is the first attempt.";
 
   return `You help maintain a personal Markdown knowledge base for one editor, stored under the folder "${ctx.editorFolder}/". You'll be given a save request (a typed note, or a description alongside uploaded file content) and a list of that editor's existing document paths.
@@ -192,6 +192,27 @@ export async function decideSave(
       "Groq returned an unexpected save-decision shape",
     );
   }
+  // Round 2 must be decisive — the prompt already instructs this (see
+  // decideSystemPrompt's roundNote), this is the code-level backstop for
+  // when the model doesn't comply. A "reorganize" decision here would mean
+  // the user answers one clarifying round only to be hit with a SECOND
+  // confirmation step (reorganize always asks first) right when they
+  // expect the save to just happen — so it's degraded into a plain write
+  // of the new note instead, silently dropping the move proposal, rather
+  // than surfacing yet another round.
+  if (ctx.clarifyRound > 0 && parsed.data.action === "reorganize") {
+    return validateWriteDecision(
+      {
+        action: "write",
+        path: parsed.data.newPath,
+        isNewFile: true,
+        content: parsed.data.content,
+        commitMessage: parsed.data.commitMessage,
+      },
+      ctx,
+    );
+  }
+
   if (parsed.data.action === "clarify") return parsed.data;
   if (parsed.data.action === "reorganize") {
     return validateReorganizeDecision(parsed.data, ctx);
