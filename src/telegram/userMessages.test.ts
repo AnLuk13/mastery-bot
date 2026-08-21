@@ -7,6 +7,7 @@ import {
   describeSaveError,
   extractClarifyContext,
   formatClarifyPrompt,
+  formatFallbackNotice,
   formatRateLimitMessage,
   formatSaveSuccess,
   isClarifyContinuation,
@@ -14,9 +15,15 @@ import {
 } from "./userMessages";
 
 describe("describeAskError", () => {
-  it("gives a distinct message for rate limiting", () => {
-    expect(describeAskError(new GroqRateLimitedError(5))).toMatch(
-      /too many questions/i,
+  it("gives a distinct message for rate limiting, including retry timing when known", () => {
+    const message = describeAskError(new GroqRateLimitedError(5));
+    expect(message).toMatch(/request limit/i);
+    expect(message).toContain("5s");
+  });
+
+  it("falls back to generic retry wording when no retry time is known", () => {
+    expect(describeAskError(new GroqRateLimitedError())).toMatch(
+      /try again shortly/i,
     );
   });
 
@@ -26,8 +33,21 @@ describe("describeAskError", () => {
     );
   });
 
+  it("formats a longer retry wait in minutes, and an even longer one in hours", () => {
+    expect(describeAskError(new GroqRateLimitedError(150))).toContain("3m");
+    expect(describeAskError(new GroqRateLimitedError(7200))).toContain("2h");
+  });
+
   it("falls back to a generic message for an unrecognized error", () => {
     expect(describeAskError(new Error("boom"))).not.toContain("boom");
+  });
+});
+
+describe("formatFallbackNotice", () => {
+  it("mentions live web search and today's limit", () => {
+    const notice = formatFallbackNotice();
+    expect(notice).toMatch(/web search/i);
+    expect(notice).toMatch(/limit/i);
   });
 });
 

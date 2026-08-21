@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { answerQuestion, type AnswerQuestionDeps } from "./answerQuestion";
+import { GroqRateLimitedError, GroqUnavailableError } from "./errors";
 import type { ChatMessage } from "./groqClient";
 import type { EmbeddingsIndex } from "./types";
 
@@ -195,5 +196,155 @@ describe("answerQuestion", () => {
 
     const userMessage = deps.capturedMessages[0][1];
     expect(userMessage.content).not.toContain("just viewing");
+  });
+
+  it("sets usedFallback: false on a normal successful answer", async () => {
+    const deps = makeDeps();
+    const result = await answerQuestion(
+      "what are embeddings?",
+      undefined,
+      deps,
+    );
+    expect(result.usedFallback).toBe(false);
+  });
+
+  describe("fallback model", () => {
+    it("falls back and answers when the primary model is rate-limited", async () => {
+      const fallbackMessages: ChatMessage[][] = [];
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError(5);
+          },
+        },
+      });
+      const fallbackGroq = {
+        createChatCompletion: async (messages: ChatMessage[]) => {
+          fallbackMessages.push(messages);
+          return { text: "fallback answer", rateLimit: undefined };
+        },
+      };
+
+      const result = await answerQuestion("what are embeddings?", undefined, {
+        ...deps,
+        fallbackGroq,
+      });
+
+      expect(result.text).toBe("fallback answer");
+      expect(result.usedFallback).toBe(true);
+      expect(fallbackMessages).toHaveLength(1);
+    });
+
+    it("falls back on a generic Groq outage too, not just rate limiting", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqUnavailableError();
+          },
+        },
+      });
+      const fallbackGroq = {
+        createChatCompletion: async () => ({
+          text: "fallback answer",
+          rateLimit: undefined,
+        }),
+      };
+
+      const result = await answerQuestion("what are embeddings?", undefined, {
+        ...deps,
+        fallbackGroq,
+      });
+
+      expect(result.usedFallback).toBe(true);
+    });
+
+    it("passes reasoningEffort to the fallback call and omits the web-search claim from its system prompt", async () => {
+      const fallbackCalls: { messages: ChatMessage[]; options: unknown }[] = [];
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+      const fallbackGroq = {
+        createChatCompletion: async (
+          messages: ChatMessage[],
+          options: unknown,
+        ) => {
+          fallbackCalls.push({ messages, options });
+          return { text: "fallback answer", rateLimit: undefined };
+        },
+      };
+
+      await answerQuestion("what are embeddings?", undefined, {
+        ...deps,
+        fallbackGroq,
+      });
+
+      expect(fallbackCalls[0].options).toEqual({ reasoningEffort: "low" });
+      expect(fallbackCalls[0].messages[0].content).not.toContain(
+        "live web search",
+      );
+    });
+
+    it("propagates the original error when there's no fallback configured", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+
+      await expect(
+        answerQuestion("what are embeddings?", undefined, deps),
+      ).rejects.toThrow(GroqRateLimitedError);
+    });
+
+    it("propagates a non-rate-limit, non-unavailable error even when a fallback is configured", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new Error("something unrelated broke");
+          },
+        },
+      });
+      const fallbackGroq = {
+        createChatCompletion: async () => ({
+          text: "should never be reached",
+          rateLimit: undefined,
+        }),
+      };
+
+      await expect(
+        answerQuestion("what are embeddings?", undefined, {
+          ...deps,
+          fallbackGroq,
+        }),
+      ).rejects.toThrow("something unrelated broke");
+    });
+
+    it("propagates the fallback's own error when the fallback also fails", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+      const fallbackGroq = {
+        createChatCompletion: async () => {
+          throw new GroqUnavailableError();
+        },
+      };
+
+      await expect(
+        answerQuestion("what are embeddings?", undefined, {
+          ...deps,
+          fallbackGroq,
+        }),
+      ).rejects.toThrow(GroqUnavailableError);
+    });
   });
 });

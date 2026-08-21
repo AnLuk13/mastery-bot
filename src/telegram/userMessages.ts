@@ -46,15 +46,35 @@ export function describeContentError(error: unknown): string {
 
 export const UNKNOWN_COMMAND_MESSAGE = "❓ Unknown command.";
 
+function formatRetryWait(retryAfterSeconds: number | undefined): string {
+  if (retryAfterSeconds === undefined) return " Please try again shortly.";
+  if (retryAfterSeconds < 60) {
+    return ` Please try again in about ${retryAfterSeconds}s.`;
+  }
+  const minutes = Math.round(retryAfterSeconds / 60);
+  if (minutes < 60) return ` Please try again in about ${minutes}m.`;
+  const hours = Math.round(minutes / 60);
+  return ` Please try again in about ${hours}h.`;
+}
+
 /** Maps any error answerQuestion() can throw to a safe, generic message. Never echoes the raw error. */
 export function describeAskError(error: unknown): string {
   if (error instanceof GroqRateLimitedError) {
-    return "⚠️ Too many questions at once — please try again in a moment.";
+    // Reaching this means even the fallback model (see answerQuestion.ts)
+    // couldn't cover it either — worth being specific that this is a
+    // shared, bot-wide Groq limit, not something the asker did wrong, since
+    // it can otherwise look like a bug that "every question" suddenly fails.
+    return `⚠️ Groq's request limit has been reached (a limit shared across everyone using this bot, not a per-person one) and the backup model is out too.${formatRetryWait(error.retryAfterSeconds)}`;
   }
   if (error instanceof GroqUnavailableError) {
     return "⚠️ Couldn't get an answer right now. Please try again shortly.";
   }
   return "⚠️ Something went wrong answering that. Please try again.";
+}
+
+/** Appended to an /ask answer that came from the fallback model — visible so a missing-web-search answer doesn't look like the model just declined to search. */
+export function formatFallbackNotice(): string {
+  return "\n\n⚠️ Answered without live web search — today's request limit for that was reached.";
 }
 
 /** Formats a snapshot of Groq's rate limits (as of the answer that carried this button) for a toast alert. */

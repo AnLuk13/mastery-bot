@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
-import { GroqUnavailableError } from "@/rag/errors";
+import { GroqRateLimitedError, GroqUnavailableError } from "@/rag/errors";
 import type { EmbeddingsIndex } from "@/rag/types";
 import type { Document } from "@/content";
 import type { EditorConfig } from "@/lib/env";
@@ -39,6 +39,7 @@ function makeDeps(
       }),
     },
     privateFolders: overrides.privateFolders ?? [],
+    fallbackGroq: overrides.fallbackGroq,
   };
 }
 
@@ -315,6 +316,52 @@ describe("createAskHandler", () => {
 
     const rows = sendMessageCalls[0].keyboard?.inline_keyboard;
     expect(rows?.some((row) => row[0]?.text === "💾 Save this")).toBe(true);
+  });
+
+  it("appends a fallback notice when the primary ask model was rate-limited but the fallback answered", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 1,
+      messageText: "what are embeddings?",
+    });
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async () => {
+          throw new GroqRateLimitedError(5);
+        },
+      },
+      fallbackGroq: {
+        createChatCompletion: async () => ({
+          text: "a fallback answer",
+          rateLimit: undefined,
+        }),
+      },
+    });
+
+    await createAskHandler(
+      deps,
+      createFakeContentProvider(),
+      createFakeSessionStore(),
+      [],
+    )(ctx);
+
+    expect(sendMessageCalls[0].text).toContain("a fallback answer");
+    expect(sendMessageCalls[0].text).toMatch(/without live web search/i);
+  });
+
+  it("does not append a fallback notice for a normal successful answer", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 1,
+      messageText: "what are embeddings?",
+    });
+
+    await createAskHandler(
+      makeDeps(),
+      createFakeContentProvider(),
+      createFakeSessionStore(),
+      [],
+    )(ctx);
+
+    expect(sendMessageCalls[0].text).not.toMatch(/without live web search/i);
   });
 
   it("omits the Save-this button for a non-editor", async () => {

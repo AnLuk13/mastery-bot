@@ -6,7 +6,13 @@ import { findEditorFolder } from "../auth";
 import { renderDocumentMessages } from "../formatting";
 import { buildAskResultKeyboard } from "../keyboards/ask";
 import type { BotContext } from "../types";
-import { appendAskTurn, describeAskError } from "../userMessages";
+import {
+  appendAskTurn,
+  describeAskError,
+  formatFallbackNotice,
+} from "../userMessages";
+
+const TELEGRAM_MESSAGE_LIMIT = 4096;
 
 export function createAskHandler(
   deps: AnswerQuestionDeps,
@@ -67,12 +73,22 @@ export function createAskHandler(
         answer.rateLimit,
       );
       const lastIndex = messages.length - 1;
+      const fallbackNotice = answer.usedFallback ? formatFallbackNotice() : "";
 
       for (let i = 0; i < messages.length; i++) {
         const { text, parseMode } = messages[i];
+        const isLast = i === lastIndex;
+        // Best-effort: if the notice would push the last chunk over
+        // Telegram's limit, just drop it rather than fail the whole answer
+        // over a footer.
+        const withNotice =
+          isLast &&
+          text.length + fallbackNotice.length <= TELEGRAM_MESSAGE_LIMIT
+            ? text + fallbackNotice
+            : text;
         await ctx.sendMessage(
-          text,
-          i === lastIndex ? keyboard : undefined,
+          withNotice,
+          isLast ? keyboard : undefined,
           parseMode,
         );
       }

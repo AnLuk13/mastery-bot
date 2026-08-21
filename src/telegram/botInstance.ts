@@ -50,6 +50,15 @@ function createSessionStore(env: ReturnType<typeof getEnv>): SessionStore {
 function getBot(): Bot {
   if (!bot) {
     const env = getEnv();
+    // Shared between /save and /ask's fallback: /save needs GROQ_MODEL for
+    // structured JSON output compound models don't support, and it doubles
+    // as /ask's fallback when the compound model's much stricter daily quota
+    // (shared across every user of this bot, since Groq rate-limits per API
+    // key, not per caller) runs out — see answerQuestion.ts.
+    const structuredGroq = new GroqClient({
+      apiKey: env.GROQ_API_KEY,
+      model: env.GROQ_MODEL,
+    });
     bot = createBot({
       token: env.TELEGRAM_BOT_TOKEN,
       contentProvider: createContentProvider(env),
@@ -58,18 +67,16 @@ function getBot(): Bot {
         embed: embedText,
         index: getEmbeddingsIndex(),
         // A Groq "compound" model, agentic and with live web search built in
-        // — distinct from GROQ_MODEL below, which /save needs for structured
-        // JSON output that compound models don't support.
+        // — distinct from GROQ_MODEL, which /save needs for structured JSON
+        // output that compound models don't support.
         groq: new GroqClient({
           apiKey: env.GROQ_API_KEY,
           model: env.GROQ_ASK_MODEL,
         }),
         privateFolders: env.PRIVATE_FOLDERS,
+        fallbackGroq: structuredGroq,
       },
-      saveGroq: new GroqClient({
-        apiKey: env.GROQ_API_KEY,
-        model: env.GROQ_MODEL,
-      }),
+      saveGroq: structuredGroq,
       editors: env.EDITORS,
       privateFolders: env.PRIVATE_FOLDERS,
       sessionStore: createSessionStore(env),
