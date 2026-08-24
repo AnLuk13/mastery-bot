@@ -156,6 +156,13 @@ export async function answerQuestion(
       hasWebSearch = attempt.hasWebSearch;
       break;
     } catch (error) {
+      // The user-facing error/notice never names the underlying cause (by
+      // design — describeAskError and formatFallbackNotice both stay
+      // generic), which otherwise leaves zero trail for "why did this
+      // fall back" beyond "it did." Logged here so a real Groq-side issue
+      // is diagnosable from Vercel logs instead of unrecoverable after the
+      // fact.
+      console.error(`Ask tier ${i} failed:`, error);
       const isLastAttempt = i === attempts.length - 1;
       const isRetryable =
         error instanceof GroqRateLimitedError ||
