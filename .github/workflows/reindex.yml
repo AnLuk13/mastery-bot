@@ -1,19 +1,25 @@
 name: Reindex embeddings and deploy
 
 # Keeps /ask's embeddings index (src/rag/data/embeddingsIndex.json) in sync
-# with the mastery content repo automatically. See
-# antonio/mastery-bot/04-rag-ask.md in that repo for why the index is
-# precomputed and committed rather than built live: embedding the whole
-# knowledge base on every chat request would be slow and wasteful, so this
-# runs on a schedule instead — no code change needed to pick up new/edited
-# notes, just a bounded delay.
+# with the mastery content repo. See antonio/mastery-bot/04-rag-ask.md in
+# that repo for why the index is precomputed and committed rather than built
+# live: embedding the whole knowledge base on every chat request would be
+# slow and wasteful.
+#
+# Event-driven, not polled: mastery-bot itself calls the Actions API to
+# dispatch this workflow the instant a /save write/delete/revert actually
+# changes content (see GitHubContentWriter's onContentChanged and
+# botInstance.ts) — no cron, no full-repo checkout+rebuild running every 30
+# minutes against nothing. This requires GITHUB_TOKEN (the same token /save
+# already uses for contents:write on the mastery repo) to ALSO have
+# Actions: write permission on this repo (mastery-bot) — a fine-grained PAT
+# needs both repos added with those two permissions; a classic PAT with
+# repo+workflow scope already covers it.
+#
+# The only remaining manual case is editing the mastery repo directly
+# outside the bot — use "Run workflow" below for that.
 on:
-  schedule:
-    # Every 30 minutes. Adjust freely — a personal, low-volume knowledge
-    # base doesn't need faster than this, and a no-op run (nothing changed)
-    # costs almost nothing.
-    - cron: "*/30 * * * *"
-  workflow_dispatch: {} # manual "run now" from the Actions tab
+  workflow_dispatch: {} # manual "run now" from the Actions tab, or via the Actions API (see above)
 
 permissions:
   contents: write # to commit+push the rebuilt index back to this repo

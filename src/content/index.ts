@@ -1,4 +1,6 @@
 export { createContentProvider } from "./createContentProvider";
+export { dispatchWorkflowRun } from "./github/dispatchWorkflowRun";
+export type { DispatchWorkflowOptions } from "./github/dispatchWorkflowRun";
 export {
   ContentNotFoundError,
   ContentProviderAuthError,

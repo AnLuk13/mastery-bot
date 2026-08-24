@@ -27,11 +27,13 @@ const DIRECTORY_PREFIX = "d:";
 const DOCUMENT_PREFIX = "f:";
 const LIMITS_PREFIX = "l:";
 const REVERT_PREFIX = "v:";
+const ADMIN_REMOVE_PREFIX = "ar:";
 const CLEANUP_SEPARATOR = "%";
 const CLEANUP_PATTERN = /^(\d+)\+(\d+)$/;
 const LIMITS_PATTERN = /^(\d+)-(\d+)-(\d+)-(\d+)$/;
 const COMMIT_SHA_ABBREV_LENGTH = 12;
 const COMMIT_SHA_PATTERN = /^[0-9a-f]{6,40}$/;
+const USER_ID_PATTERN = /^\d+$/;
 export const SEARCH_HELP_CALLBACK_DATA = "s";
 export const TOO_LONG_CALLBACK_DATA = "x";
 /** No payload: the handler reads the tapped message's own text (BotContext.callbackMessageText) rather than anything encoded here. */
@@ -42,6 +44,8 @@ export const REORGANIZE_DECLINE_CALLBACK_DATA = "n";
 /** No payload, same reasoning again: the pending delete proposal rides in the confirm/decline message's own text. Distinct from the reorganize sentinels above — otherwise a tap couldn't tell which kind of proposal it's confirming. */
 export const DELETE_CONFIRM_CALLBACK_DATA = "dy";
 export const DELETE_DECLINE_CALLBACK_DATA = "dn";
+/** No payload: tapping this just prompts for a reply, which carries the actual user id. */
+export const ADMIN_ADD_PROMPT_CALLBACK_DATA = "aa";
 
 export interface CleanupHint {
   /** message_id of the first extra message to delete (a consecutive run of `count` messages). */
@@ -66,6 +70,8 @@ export type DecodedCallback =
   | { type: "reorganize-decline" }
   | { type: "delete-confirm" }
   | { type: "delete-decline" }
+  | { type: "admin-add-prompt" }
+  | { type: "admin-remove"; userId: number }
   | { type: "too-long" }
   | { type: "invalid" };
 
@@ -129,6 +135,11 @@ export function encodeRevertCallbackData(
   return isCallbackDataTooLarge(data) ? undefined : data;
 }
 
+/** Telegram user ids are small numbers, so this always fits Telegram's budget — no undefined case, unlike the path-carrying encoders above. */
+export function encodeAdminRemoveCallbackData(userId: number): string {
+  return `${ADMIN_REMOVE_PREFIX}${userId}`;
+}
+
 /** Never trusts callback_data: any unrecognized shape or unsafe path decodes to {type:"invalid"}. */
 export function decodeCallbackData(data: string): DecodedCallback {
   if (data === SEARCH_HELP_CALLBACK_DATA) return { type: "search-help" };
@@ -142,6 +153,9 @@ export function decodeCallbackData(data: string): DecodedCallback {
   }
   if (data === DELETE_CONFIRM_CALLBACK_DATA) return { type: "delete-confirm" };
   if (data === DELETE_DECLINE_CALLBACK_DATA) return { type: "delete-decline" };
+  if (data === ADMIN_ADD_PROMPT_CALLBACK_DATA) {
+    return { type: "admin-add-prompt" };
+  }
 
   if (data.startsWith(DOCUMENT_PREFIX)) {
     return decodePath("document", data.slice(DOCUMENT_PREFIX.length));
@@ -155,6 +169,14 @@ export function decodeCallbackData(data: string): DecodedCallback {
   if (data.startsWith(REVERT_PREFIX)) {
     const target = parseRevertTarget(data.slice(REVERT_PREFIX.length));
     return target ? { type: "revert", target } : { type: "invalid" };
+  }
+
+  if (data.startsWith(ADMIN_REMOVE_PREFIX)) {
+    const raw = data.slice(ADMIN_REMOVE_PREFIX.length);
+    const userId = Number(raw);
+    return USER_ID_PATTERN.test(raw) && Number.isSafeInteger(userId)
+      ? { type: "admin-remove", userId }
+      : { type: "invalid" };
   }
 
   if (data.startsWith(DIRECTORY_PREFIX)) {

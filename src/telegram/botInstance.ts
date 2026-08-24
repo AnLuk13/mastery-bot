@@ -1,6 +1,15 @@
 import { Redis } from "@upstash/redis";
 import type { Bot } from "grammy";
-import { createContentProvider, GitHubContentWriter } from "@/content";
+import {
+  NullAllowedUsersStore,
+  RedisAllowedUsersStore,
+  type AllowedUsersStore,
+} from "@/admin";
+import {
+  createContentProvider,
+  dispatchWorkflowRun,
+  GitHubContentWriter,
+} from "@/content";
 import { getEnv } from "@/lib/env";
 import { embedText } from "@/rag/embeddingModel";
 import { getEmbeddingsIndex } from "@/rag/embeddingsIndex";
@@ -35,16 +44,37 @@ const DISABLED_CONTENT_WRITER: ContentWriterLike = {
 let bot: Bot | undefined;
 let initPromise: Promise<void> | undefined;
 
-function createSessionStore(env: ReturnType<typeof getEnv>): SessionStore {
-  if (!env.KV_REST_API_URL || !env.KV_REST_API_TOKEN) {
-    return new NullSessionStore();
-  }
-  return new RedisSessionStore(
-    new Redis({
-      url: env.KV_REST_API_URL,
-      token: env.KV_REST_API_TOKEN,
-    }),
-  );
+// mastery-bot's own repo/workflow — see reindex.yml and GitHubContentWriter's
+// onContentChanged for why this is event-driven rather than cron-polled.
+const REINDEX_WORKFLOW_FILE = "reindex.yml";
+const REINDEX_WORKFLOW_REF = "main";
+
+function createRedisClient(env: ReturnType<typeof getEnv>): Redis | undefined {
+  if (!env.KV_REST_API_URL || !env.KV_REST_API_TOKEN) return undefined;
+  return new Redis({ url: env.KV_REST_API_URL, token: env.KV_REST_API_TOKEN });
+}
+
+function createSessionStore(redis: Redis | undefined): SessionStore {
+  return redis ? new RedisSessionStore(redis) : new NullSessionStore();
+}
+
+function createAllowedUsersStore(redis: Redis | undefined): AllowedUsersStore {
+  return redis
+    ? new RedisAllowedUsersStore(redis)
+    : new NullAllowedUsersStore();
+}
+
+/** Best-effort: never awaited or allowed to fail the write it followed (see GitHubContentWriter.onContentChanged). */
+function triggerReindex(env: ReturnType<typeof getEnv>): void {
+  dispatchWorkflowRun({
+    owner: env.GITHUB_OWNER as string,
+    repo: env.BOT_REPOSITORY,
+    workflowFile: REINDEX_WORKFLOW_FILE,
+    ref: REINDEX_WORKFLOW_REF,
+    token: env.GITHUB_TOKEN as string,
+  }).catch((error: unknown) => {
+    console.error("Failed to trigger reindex workflow:", error);
+  });
 }
 
 function getBot(): Bot {
@@ -59,10 +89,13 @@ function getBot(): Bot {
       apiKey: env.GROQ_API_KEY,
       model: env.GROQ_MODEL,
     });
+    const redis = createRedisClient(env);
     bot = createBot({
       token: env.TELEGRAM_BOT_TOKEN,
       contentProvider: createContentProvider(env),
       allowedUserIds: env.ALLOWED_TELEGRAM_USER_IDS,
+      adminIds: env.BOT_ADMIN_IDS,
+      allowedUsersStore: createAllowedUsersStore(redis),
       askDeps: {
         embed: embedText,
         index: getEmbeddingsIndex(),
@@ -79,7 +112,7 @@ function getBot(): Bot {
       saveGroq: structuredGroq,
       editors: env.EDITORS,
       privateFolders: env.PRIVATE_FOLDERS,
-      sessionStore: createSessionStore(env),
+      sessionStore: createSessionStore(redis),
       // /save always writes to GitHub directly regardless of CONTENT_PROVIDER
       // (env.ts requires GITHUB_OWNER/GITHUB_REPOSITORY/GITHUB_TOKEN whenever
       // EDITORS is non-empty, so these are guaranteed present here).
@@ -91,6 +124,7 @@ function getBot(): Bot {
               branch: env.GITHUB_BRANCH,
               contentPath: env.GITHUB_CONTENT_PATH ?? "",
               token: env.GITHUB_TOKEN,
+              onContentChanged: () => triggerReindex(env),
             })
           : DISABLED_CONTENT_WRITER,
     });

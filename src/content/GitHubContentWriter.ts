@@ -14,6 +14,13 @@ export interface GitHubContentWriterOptions {
   contentPath: string;
   token?: string;
   fetchImpl?: typeof fetch;
+  /**
+   * Called after every successful write/delete/revert — e.g. to trigger a
+   * reindex. Best-effort by design: the writer never awaits or fails on it,
+   * so a slow or failing hook can't turn a successful save into an error the
+   * user sees.
+   */
+  onContentChanged?: () => void;
 }
 
 export interface WriteResult {
@@ -38,6 +45,7 @@ export class GitHubContentWriter {
   private readonly client: GitHubApiClient;
   private readonly branch: string;
   private readonly contentPathPrefix: string;
+  private readonly onContentChanged: (() => void) | undefined;
 
   constructor(options: GitHubContentWriterOptions) {
     this.client = new GitHubApiClient({
@@ -48,6 +56,7 @@ export class GitHubContentWriter {
     });
     this.branch = options.branch;
     this.contentPathPrefix = normalizeRelativePath(options.contentPath);
+    this.onContentChanged = options.onContentChanged;
   }
 
   async write(
@@ -71,6 +80,7 @@ export class GitHubContentWriter {
       this.branch,
       currentSha,
     );
+    this.onContentChanged?.();
 
     return { path: canonical, beforeCommitSha };
   }
@@ -106,6 +116,7 @@ export class GitHubContentWriter {
       message,
       this.branch,
     );
+    this.onContentChanged?.();
 
     return { path: canonical, beforeCommitSha };
   }
@@ -155,6 +166,7 @@ export class GitHubContentWriter {
           message,
           this.branch,
         );
+        this.onContentChanged?.();
       }
       // else: already gone, nothing to do.
     } else {
@@ -168,6 +180,7 @@ export class GitHubContentWriter {
         this.branch,
         currentSha,
       );
+      this.onContentChanged?.();
     }
   }
 

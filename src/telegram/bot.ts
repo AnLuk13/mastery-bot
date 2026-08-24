@@ -1,10 +1,18 @@
 import { Bot, type BotConfig, type Context } from "grammy";
+import type { AllowedUsersStore } from "@/admin";
 import type { ContentProvider, PrivateFolderConfig } from "@/content";
 import type { EditorConfig } from "@/lib/env";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import type { GroqClient } from "@/rag/groqClient";
 import type { SessionStore } from "@/session";
 import { adaptContext } from "./adapter";
+import {
+  createAdminAddPromptHandler,
+  createAdminAddUserHandler,
+  createAdminHandler,
+  createAdminRemoveHandler,
+  isAdminAddUserContinuation,
+} from "./handlers/admin";
 import { enforceAuthorization } from "./auth";
 import { decodeCallbackData } from "./callbackData";
 import { createAskHandler } from "./handlers/ask";
@@ -44,6 +52,10 @@ export interface CreateBotOptions {
   privateFolders: readonly PrivateFolderConfig[];
   /** Ambient /ask conversation memory — see src/session. */
   sessionStore: SessionStore;
+  /** Telegram user ids allowed to use /admin (add/remove allowed users). Empty means the feature is inactive. */
+  adminIds: readonly number[];
+  /** Backs /admin's dynamic (runtime-added) allowed-user list — layered on top of allowedUserIds, which stays immutable. */
+  allowedUsersStore: AllowedUsersStore;
   /** Pass to skip grammY's getMe network call, e.g. in tests. */
   botInfo?: BotConfig<Context>["botInfo"];
 }
@@ -63,7 +75,13 @@ export function createBot(options: CreateBotOptions): Bot {
 
   bot.use(async (grammyCtx, next) => {
     const ctx = adaptContext(grammyCtx);
-    if (!(await enforceAuthorization(ctx, allowedUserIds))) return;
+    // Merged fresh on every update: allowedUserIds is the immutable env base
+    // list, allowedUsersStore holds whatever /admin has added/removed since
+    // (see src/admin) — a newly-added user must pass this check with no
+    // redeploy needed.
+    const dynamicUserIds = await options.allowedUsersStore.list();
+    const effectiveAllowedIds = [...allowedUserIds, ...dynamicUserIds];
+    if (!(await enforceAuthorization(ctx, effectiveAllowedIds))) return;
     await next();
   });
 
@@ -105,6 +123,20 @@ export function createBot(options: CreateBotOptions): Bot {
     await saveHandler(adaptContext(grammyCtx));
   });
 
+  const adminDeps = {
+    adminIds: options.adminIds,
+    baseAllowedUserIds: allowedUserIds,
+    allowedUsersStore: options.allowedUsersStore,
+  };
+  const adminHandler = createAdminHandler(adminDeps);
+  const adminAddPromptHandler = createAdminAddPromptHandler(adminDeps);
+  const adminAddUserHandler = createAdminAddUserHandler(adminDeps);
+  const adminRemoveHandler = createAdminRemoveHandler(adminDeps);
+
+  bot.command("admin", async (grammyCtx) => {
+    await adminHandler(adaptContext(grammyCtx));
+  });
+
   // Unambiguous by message type alone — no command needed. Non-editors and
   // unsupported file types are rejected inside the handler itself.
   bot.on("message:document", async (grammyCtx) => {
@@ -124,6 +156,10 @@ export function createBot(options: CreateBotOptions): Bot {
       // An unrecognized command (the known ones above already returned without
       // calling next()) — don't treat it as a question to the AI.
       await ctx.sendMessage(UNKNOWN_COMMAND_MESSAGE);
+      return;
+    }
+    if (isAdminAddUserContinuation(ctx)) {
+      await adminAddUserHandler(ctx);
       return;
     }
     if (isSaveClarifyContinuation(ctx)) {
@@ -176,6 +212,12 @@ export function createBot(options: CreateBotOptions): Bot {
         break;
       case "delete-decline":
         await deleteConfirmHandler(ctx, false);
+        break;
+      case "admin-add-prompt":
+        await adminAddPromptHandler(ctx);
+        break;
+      case "admin-remove":
+        await adminRemoveHandler(ctx, decoded.userId);
         break;
       case "search-help":
         await handleSearchHelpCallback(ctx);

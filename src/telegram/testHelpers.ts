@@ -1,5 +1,6 @@
 /** Test-only fakes for BotContext and ContentProvider; not imported by application code. */
 import type { InlineKeyboard } from "grammy";
+import type { AllowedUsersStore } from "@/admin";
 import { ContentNotFoundError, type ContentProvider } from "@/content";
 import { EMPTY_SESSION, type Session, type SessionStore } from "@/session";
 import type { BotContext, ParseMode } from "./types";
@@ -175,6 +176,26 @@ export function createFakeContentWriter(
   };
 
   return { writer, writes, deletes, reverts };
+}
+
+export function createFakeAllowedUsersStore(
+  initial: number[] = [],
+): AllowedUsersStore & { ids: number[] } {
+  const ids = [...initial];
+
+  return {
+    ids,
+    async list() {
+      return [...ids];
+    },
+    async add(userId) {
+      if (!ids.includes(userId)) ids.push(userId);
+    },
+    async remove(userId) {
+      const index = ids.indexOf(userId);
+      if (index !== -1) ids.splice(index, 1);
+    },
+  };
 }
 
 export function createFakeSessionStore(

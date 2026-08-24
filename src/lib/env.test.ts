@@ -132,4 +132,33 @@ describe("parseEnv", () => {
     });
     expect(env.EDITORS).toEqual([{ userId: 712059530, folder: "antonio" }]);
   });
+
+  it("defaults BOT_REPOSITORY to mastery-bot when not set", () => {
+    const env = parseEnv(baseValidLocalEnv);
+    expect(env.BOT_REPOSITORY).toBe("mastery-bot");
+  });
+
+  it("honors an explicit BOT_REPOSITORY", () => {
+    const env = parseEnv({ ...baseValidLocalEnv, BOT_REPOSITORY: "my-fork" });
+    expect(env.BOT_REPOSITORY).toBe("my-fork");
+  });
+
+  it("defaults BOT_ADMIN_IDS to an empty array when not set", () => {
+    const env = parseEnv(baseValidLocalEnv);
+    expect(env.BOT_ADMIN_IDS).toEqual([]);
+  });
+
+  it("parses BOT_ADMIN_IDS into numeric ids", () => {
+    const env = parseEnv({
+      ...baseValidLocalEnv,
+      BOT_ADMIN_IDS: "712059530, 111",
+    });
+    expect(env.BOT_ADMIN_IDS).toEqual([712059530, 111]);
+  });
+
+  it("rejects a non-numeric BOT_ADMIN_IDS entry", () => {
+    expect(() =>
+      parseEnv({ ...baseValidLocalEnv, BOT_ADMIN_IDS: "abc" }),
+    ).toThrowError(/numeric Telegram user id/);
+  });
 });

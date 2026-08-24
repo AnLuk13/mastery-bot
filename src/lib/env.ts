@@ -59,6 +59,26 @@ const editorsSchema = z
   )
   .pipe(z.array(editorEntry));
 
+// Comma-separated numeric Telegram user ids. Optional and empty by default,
+// same shape as editorsSchema/privateFoldersSchema below.
+const adminIdsSchema = z
+  .string()
+  .optional()
+  .transform((value) =>
+    (value ?? "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter((part) => part !== ""),
+  )
+  .pipe(
+    z.array(
+      z
+        .string()
+        .regex(/^\d+$/, "must be a numeric Telegram user id")
+        .transform(Number),
+    ),
+  );
+
 const privateFolderEntry = z
   .string()
   .regex(
@@ -124,6 +144,16 @@ const baseSchema = z.object({
   GROQ_ASK_MODEL: z.string().min(1).default("groq/compound-mini"),
   EDITORS: editorsSchema,
   PRIVATE_FOLDERS: privateFoldersSchema,
+  // This app's own repo (not the content repo) — used to trigger its
+  // reindex.yml workflow via the Actions API the instant /save writes
+  // something, instead of that workflow polling on a cron. Defaults to this
+  // project's actual repo name since it's intrinsic to the deployment, not
+  // per-installation config like GITHUB_REPOSITORY (the content repo) is.
+  BOT_REPOSITORY: z.string().min(1).default("mastery-bot"),
+  // Telegram user ids allowed to manage ALLOWED_TELEGRAM_USER_IDS at runtime
+  // via /admin (add/remove, backed by KV — see src/admin). Optional and
+  // empty by default, same as EDITORS: the feature is simply off until set.
+  BOT_ADMIN_IDS: adminIdsSchema,
   // Both optional: ambient /ask session memory (see src/session) is simply
   // off — falls back to a no-op store — when these aren't configured. Names
   // match what Vercel's "Upstash for Redis" marketplace integration actually

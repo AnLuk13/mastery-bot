@@ -3,13 +3,19 @@ import { ContentWriteConflictError } from "@/content";
 import { GroqRateLimitedError, GroqUnavailableError } from "@/rag/errors";
 import {
   appendAskTurn,
+  describeAdminError,
   describeAskError,
   describeSaveError,
   extractClarifyContext,
+  formatAdminAddPrompt,
+  formatAdminList,
+  formatAdminUserAdded,
+  formatAdminUserRemoved,
   formatClarifyPrompt,
   formatFallbackNotice,
   formatRateLimitMessage,
   formatSaveSuccess,
+  isAdminAddContinuation,
   isClarifyContinuation,
   truncateForAskContext,
 } from "./userMessages";
@@ -113,6 +119,54 @@ describe("describeSaveError", () => {
 
   it("falls back to a generic message for an unrecognized error", () => {
     expect(describeSaveError(new Error("boom"))).not.toContain("boom");
+  });
+});
+
+describe("formatAdminList", () => {
+  it("distinguishes base (env) users from dynamically-added ones", () => {
+    const text = formatAdminList([123], [456]);
+    expect(text).toMatch(/123[\s\S]*base/i);
+    expect(text).toContain("456");
+  });
+
+  it("shows (none) for an empty dynamic list", () => {
+    expect(formatAdminList([123], [])).toContain("(none)");
+  });
+});
+
+describe("formatAdminAddPrompt / isAdminAddContinuation", () => {
+  it("recognizes its own prompt as a continuation", () => {
+    expect(isAdminAddContinuation(formatAdminAddPrompt())).toBe(true);
+  });
+
+  it("does not recognize an unrelated message", () => {
+    expect(isAdminAddContinuation("just a regular message")).toBe(false);
+  });
+
+  it("is false for undefined", () => {
+    expect(isAdminAddContinuation(undefined)).toBe(false);
+  });
+});
+
+describe("formatAdminUserAdded / formatAdminUserRemoved", () => {
+  it("includes the user id in both messages", () => {
+    expect(formatAdminUserAdded(555)).toContain("555");
+    expect(formatAdminUserRemoved(555)).toContain("555");
+  });
+});
+
+describe("describeAdminError", () => {
+  it("names the missing KV config specifically", () => {
+    const message = describeAdminError(
+      new Error(
+        "Dynamic user management requires KV_REST_API_URL/KV_REST_API_TOKEN to be configured",
+      ),
+    );
+    expect(message).toMatch(/KV_REST_API_URL/);
+  });
+
+  it("falls back to a generic message for anything else", () => {
+    expect(describeAdminError(new Error("boom"))).toMatch(/went wrong/i);
   });
 });
 

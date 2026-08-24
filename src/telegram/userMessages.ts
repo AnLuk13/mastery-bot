@@ -281,6 +281,58 @@ export function formatRevertSuccess(path: string): string {
   return `↩️ Reverted ${path}.`;
 }
 
+export const ADMIN_USAGE_MESSAGE = "👤 Usage: /admin to manage allowed users.";
+export const ADMIN_INVALID_USER_ID_MESSAGE =
+  "⚠️ That doesn't look like a numeric Telegram user id. Reply with just the number (ask the person to message @userinfobot to find theirs).";
+
+/** Lists both the immutable env-configured base ids and the dynamically-added ones — the two are visually distinguished since only the latter can be removed via /admin. */
+export function formatAdminList(
+  baseUserIds: readonly number[],
+  dynamicUserIds: readonly number[],
+): string {
+  const baseLines =
+    baseUserIds.length > 0
+      ? baseUserIds.map((id) => `🔒 ${id} (base, from env)`).join("\n")
+      : "(none)";
+  const dynamicLines =
+    dynamicUserIds.length > 0
+      ? dynamicUserIds.map((id) => `${id}`).join("\n")
+      : "(none)";
+  return `👤 Allowed users\n\nBase (env-configured, not removable here):\n${baseLines}\n\nAdded via /admin:\n${dynamicLines}`;
+}
+
+const ADMIN_ADD_MARKER = "⎯⎯⎯ admin-add-user (do not edit) ⎯⎯⎯";
+
+export function formatAdminAddPrompt(): string {
+  return `➕ Reply to THIS message with the Telegram user id to add.\n\n${ADMIN_ADD_MARKER}`;
+}
+
+/** True when `replyToMessageText` is a reply to one of our own admin add-user prompts. */
+export function isAdminAddContinuation(
+  replyToMessageText: string | undefined,
+): boolean {
+  return (
+    replyToMessageText !== undefined &&
+    replyToMessageText.includes(ADMIN_ADD_MARKER)
+  );
+}
+
+export function formatAdminUserAdded(userId: number): string {
+  return `✅ Added ${userId} to the allowed-user list.`;
+}
+
+export function formatAdminUserRemoved(userId: number): string {
+  return `🗑️ Removed ${userId} from the allowed-user list.`;
+}
+
+/** Maps any error the /admin flow can throw to a safe message. Never echoes the raw error, except to recognize the one case worth naming specifically: KV not configured (see NullAllowedUsersStore). */
+export function describeAdminError(error: unknown): string {
+  if (error instanceof Error && error.message.includes("KV_REST_API_URL")) {
+    return "⚠️ Dynamic user management isn't set up yet (KV_REST_API_URL/KV_REST_API_TOKEN aren't configured).";
+  }
+  return "⚠️ Something went wrong managing users. Please try again.";
+}
+
 /** Maps any error the /save flow can throw to a safe, generic message. Never echoes the raw error. */
 export function describeSaveError(error: unknown): string {
   if (error instanceof GroqRateLimitedError) {

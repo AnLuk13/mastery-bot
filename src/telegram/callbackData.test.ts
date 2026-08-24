@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  ADMIN_ADD_PROMPT_CALLBACK_DATA,
   decodeCallbackData,
   DELETE_CONFIRM_CALLBACK_DATA,
   DELETE_DECLINE_CALLBACK_DATA,
+  encodeAdminRemoveCallbackData,
   encodeLimitsCallbackData,
   encodeNavigateCallbackData,
   encodeRevertCallbackData,
@@ -267,6 +269,29 @@ describe("encodeRevertCallbackData / decode", () => {
     expect(
       encodeRevertCallbackData(longPath, "abcdef1234567890"),
     ).toBeUndefined();
+  });
+});
+
+describe("admin callbacks", () => {
+  it("decodes the admin-add-prompt sentinel", () => {
+    expect(decodeCallbackData(ADMIN_ADD_PROMPT_CALLBACK_DATA)).toEqual({
+      type: "admin-add-prompt",
+    });
+  });
+
+  it("round-trips an admin-remove user id through encode then decode", () => {
+    const data = encodeAdminRemoveCallbackData(712059530);
+    expect(data).toBe("ar:712059530");
+    expect(decodeCallbackData(data)).toEqual({
+      type: "admin-remove",
+      userId: 712059530,
+    });
+  });
+
+  it("rejects a malformed admin-remove callback", () => {
+    expect(decodeCallbackData("ar:not-a-number")).toEqual({ type: "invalid" });
+    expect(decodeCallbackData("ar:")).toEqual({ type: "invalid" });
+    expect(decodeCallbackData("ar:-5")).toEqual({ type: "invalid" });
   });
 });
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { GroqClient } from "@/rag/groqClient";
 import type { AnswerQuestionDeps } from "@/rag/answerQuestion";
 import {
+  createFakeAllowedUsersStore,
   createFakeContentProvider,
   createFakeContentWriter,
   createFakeSessionStore,
@@ -55,6 +56,8 @@ describe("createBot", () => {
       contentWriter: createFakeContentWriter().writer,
       privateFolders: [],
       sessionStore: createFakeSessionStore(),
+      adminIds: [],
+      allowedUsersStore: createFakeAllowedUsersStore(),
       botInfo: fakeBotInfo,
     });
 

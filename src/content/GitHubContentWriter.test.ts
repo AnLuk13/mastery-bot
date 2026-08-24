@@ -12,13 +12,18 @@ const fixture = dir({
   }),
 });
 
-function makeWriter(fetchImpl: typeof fetch, contentPath = "") {
+function makeWriter(
+  fetchImpl: typeof fetch,
+  contentPath = "",
+  onContentChanged?: () => void,
+) {
   return new GitHubContentWriter({
     owner: "test-owner",
     repo: "test-repo",
     branch: "main",
     contentPath,
     fetchImpl,
+    onContentChanged,
   });
 }
 
@@ -185,5 +190,65 @@ describe("GitHubContentWriter.revert", () => {
     await expect(
       writer.revert("antonio/networking/never-existed.md", "commit-0", "noop"),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("GitHubContentWriter onContentChanged", () => {
+  it("calls it after a successful write", async () => {
+    let calls = 0;
+    const writer = makeWriter(createMockGitHubFetch(fixture), "", () => {
+      calls++;
+    });
+    await writer.write("antonio/networking/new-note.md", "content", "save");
+    expect(calls).toBe(1);
+  });
+
+  it("calls it after a successful delete", async () => {
+    let calls = 0;
+    const writer = makeWriter(createMockGitHubFetch(fixture), "", () => {
+      calls++;
+    });
+    await writer.delete("antonio/networking/dns.md", "delete");
+    expect(calls).toBe(1);
+  });
+
+  it("calls it after a revert that restores content", async () => {
+    let calls = 0;
+    const fetchImpl = createMockGitHubFetch(fixture);
+    const writer = makeWriter(fetchImpl, "", () => {
+      calls++;
+    });
+    const { beforeCommitSha } = await writer.write(
+      "antonio/networking/dns.md",
+      "edited",
+      "save",
+    );
+    expect(calls).toBe(1);
+    await writer.revert("antonio/networking/dns.md", beforeCommitSha, "undo");
+    expect(calls).toBe(2);
+  });
+
+  it("does not call it when revert is a no-op (nothing to restore)", async () => {
+    let calls = 0;
+    const writer = makeWriter(createMockGitHubFetch(fixture), "", () => {
+      calls++;
+    });
+    await writer.revert(
+      "antonio/networking/never-existed.md",
+      "commit-0",
+      "noop",
+    );
+    expect(calls).toBe(0);
+  });
+
+  it("does not call it when the write is rejected before touching GitHub", async () => {
+    let calls = 0;
+    const writer = makeWriter(createMockGitHubFetch(fixture), "", () => {
+      calls++;
+    });
+    await expect(
+      writer.write("antonio/networking", "content", "message"),
+    ).rejects.toThrow(InvalidPathError);
+    expect(calls).toBe(0);
   });
 });
