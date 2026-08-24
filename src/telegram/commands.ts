@@ -14,4 +14,8 @@ export const BOT_COMMANDS = [
     command: "save",
     description: "Save a note, or upload a .txt/.md file",
   },
+  {
+    command: "admin",
+    description: "Manage allowed users (admin only)",
+  },
 ] as const;
