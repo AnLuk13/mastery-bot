@@ -103,6 +103,57 @@ describe("parseMarkdownToBlocks", () => {
     expect(parse("---")).toEqual([{ kind: "divider", html: "──────────" }]);
   });
 
+  describe("tables", () => {
+    it("renders a GFM table as an aligned plain-text code block, not silently dropped", () => {
+      const source = [
+        "| Fuel type | Price (MDL / L) |",
+        "|-----------|----------------|",
+        "| Diesel    | **31.98 MDL** |",
+        "| Gasoline  | **30.12 MDL** |",
+      ].join("\n");
+
+      expect(parse(source)).toEqual([
+        {
+          kind: "code",
+          content: [
+            "Fuel type | Price (MDL / L)",
+            "----------|----------------",
+            "Diesel    | 31.98 MDL",
+            "Gasoline  | 30.12 MDL",
+          ].join("\n"),
+          language: undefined,
+        },
+      ]);
+    });
+
+    it("strips inline formatting from cells to plain text rather than leaking markup", () => {
+      const source = ["| A | B |", "|---|---|", "| [x](y) | `code` |"].join(
+        "\n",
+      );
+      const blocks = parse(source);
+      expect(blocks[0].kind).toBe("code");
+      expect((blocks[0] as { content: string }).content).not.toMatch(/<|>/);
+    });
+
+    it("renders surrounding paragraphs normally around a table", () => {
+      const source = [
+        "Before.",
+        "",
+        "| A |",
+        "|---|",
+        "| 1 |",
+        "",
+        "After.",
+      ].join("\n");
+      const blocks = parse(source);
+      expect(blocks.map((b) => b.kind)).toEqual([
+        "paragraph",
+        "code",
+        "paragraph",
+      ]);
+    });
+  });
+
   it("does not treat raw inline HTML in source as trusted markup", () => {
     const blocks = parse("<script>alert(1)</script>");
     expect(blocks).toEqual([

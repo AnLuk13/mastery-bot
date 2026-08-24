@@ -1,7 +1,7 @@
 import MarkdownIt from "markdown-it";
 import { renderCodeBlockHtml } from "./codeBlock";
 import { escapeHtml } from "./html";
-import { renderInlineTokens } from "./inline";
+import { renderInlinePlainText, renderInlineTokens } from "./inline";
 import type { Token } from "./markdownItTypes";
 
 export type Block =
@@ -111,6 +111,71 @@ function renderList(
   return lines.join("\n");
 }
 
+/**
+ * Renders a GFM table (markdown-it parses these natively, no plugin needed)
+ * as an aligned plain-text grid — Telegram's HTML parse_mode has no <table>
+ * support, so this is emitted as a "code" block (monospace <pre>) rather
+ * than attempting real HTML markup. Cell formatting (bold, links, etc.) is
+ * stripped to plain text via renderInlinePlainText rather than converted to
+ * HTML, since nested tags inside <pre><code> aren't reliable in Telegram's
+ * parse mode.
+ */
+function renderTableAsText(
+  tokens: Token[],
+  openIndex: number,
+  closeIndex: number,
+): string {
+  const rows: string[][] = [];
+  let i = openIndex + 1;
+
+  while (i < closeIndex) {
+    const token = tokens[i];
+    if (token.type === "tr_open") {
+      const trClose = findClose(tokens, i, "tr_close");
+      const cells: string[] = [];
+      let j = i + 1;
+      while (j < trClose) {
+        if (tokens[j].type === "th_open" || tokens[j].type === "td_open") {
+          cells.push(renderInlineChildAtPlain(tokens, j + 1));
+        }
+        j++;
+      }
+      rows.push(cells);
+      i = trClose + 1;
+    } else {
+      i++;
+    }
+  }
+
+  const columnCount = Math.max(0, ...rows.map((row) => row.length));
+  const widths = Array.from({ length: columnCount }, (_, col) =>
+    Math.max(...rows.map((row) => (row[col] ?? "").length)),
+  );
+
+  function formatRow(row: string[]): string {
+    return row
+      .map((cell, col) => cell.padEnd(widths[col]))
+      .join(" | ")
+      .trimEnd();
+  }
+
+  const lines: string[] = [];
+  if (rows.length > 0) {
+    lines.push(formatRow(rows[0]));
+    lines.push(widths.map((w) => "-".repeat(w)).join("-|-"));
+    for (const row of rows.slice(1)) lines.push(formatRow(row));
+  }
+
+  return lines.join("\n");
+}
+
+function renderInlineChildAtPlain(
+  tokens: Token[],
+  inlineIndex: number,
+): string {
+  return renderInlinePlainText(tokens[inlineIndex]?.children ?? []);
+}
+
 /** Recursively walks a (possibly nested, e.g. inside a blockquote) slice of the token stream into flat Blocks. */
 function renderBlocks(tokens: Token[], start: number, end: number): Block[] {
   const blocks: Block[] = [];
@@ -184,6 +249,16 @@ function renderBlocks(tokens: Token[], start: number, end: number): Block[] {
         blocks.push({ kind: "divider", html: "──────────" });
         i++;
         break;
+      case "table_open": {
+        const closeIndex = findClose(tokens, i, "table_close");
+        blocks.push({
+          kind: "code",
+          content: renderTableAsText(tokens, i, closeIndex),
+          language: undefined,
+        });
+        i = closeIndex + 1;
+        break;
+      }
       case "html_block":
         // Raw HTML in source markdown isn't executed as Telegram markup — shown as plain escaped text instead.
         blocks.push({

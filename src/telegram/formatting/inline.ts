@@ -63,3 +63,39 @@ export function renderInlineTokens(children: Token[]): string {
 
   return html;
 }
+
+/**
+ * Plain-text sibling of renderInlineTokens — strips emphasis/link markup
+ * instead of converting it to HTML, and returns unescaped text (the caller
+ * is responsible for escaping, e.g. via renderCodeBlockHtml). Used for table
+ * cells, which render as a plain-text/monospace block (see blocks.ts) rather
+ * than Telegram HTML, since Telegram's HTML mode has no <table> support.
+ */
+export function renderInlinePlainText(children: Token[]): string {
+  let text = "";
+  for (const token of children) {
+    switch (token.type) {
+      case "text":
+      case "code_inline":
+        text += token.content;
+        break;
+      case "softbreak":
+      case "hardbreak":
+        text += " ";
+        break;
+      case "image":
+        text += token.content || "[image]";
+        break;
+      case "strong_open":
+      case "strong_close":
+      case "em_open":
+      case "em_close":
+      case "link_open":
+      case "link_close":
+        break;
+      default:
+        if (typeof token.content === "string") text += token.content;
+    }
+  }
+  return text;
+}
