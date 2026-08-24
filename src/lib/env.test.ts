@@ -79,6 +79,11 @@ describe("parseEnv", () => {
     expect(env.GROQ_ASK_MODEL).toBe("groq/compound-mini");
   });
 
+  it("defaults GROQ_ASK_FALLBACK_MODEL when not set", () => {
+    const env = parseEnv(baseValidLocalEnv);
+    expect(env.GROQ_ASK_FALLBACK_MODEL).toBe("groq/compound");
+  });
+
   it("defaults EDITORS to an empty array when not set", () => {
     const env = parseEnv(baseValidLocalEnv);
     expect(env.EDITORS).toEqual([]);

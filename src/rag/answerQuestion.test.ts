@@ -207,6 +207,141 @@ describe("answerQuestion", () => {
     );
     expect(result.usedFallback).toBe(false);
     expect(result.fallbackReason).toBeUndefined();
+    expect(result.hasWebSearch).toBe(true);
+  });
+
+  describe("two-tier compound fallback", () => {
+    it("tries the second compound model before giving up web search, and keeps hasWebSearch true", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+      const webSearchFallbackGroq = {
+        createChatCompletion: async () => ({
+          text: "answer from the second compound model",
+          rateLimit: undefined,
+        }),
+      };
+
+      const result = await answerQuestion("what are embeddings?", undefined, {
+        ...deps,
+        webSearchFallbackGroq,
+      });
+
+      expect(result.text).toBe("answer from the second compound model");
+      expect(result.usedFallback).toBe(true);
+      expect(result.fallbackReason).toBe("rate-limited");
+      expect(result.hasWebSearch).toBe(true);
+    });
+
+    it("does not pass reasoningEffort to the second compound model — it rejects that option like the primary", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+      const calls: unknown[] = [];
+      const webSearchFallbackGroq = {
+        createChatCompletion: async (
+          _messages: ChatMessage[],
+          options: unknown,
+        ) => {
+          calls.push(options);
+          return { text: "answer", rateLimit: undefined };
+        },
+      };
+
+      await answerQuestion("what are embeddings?", undefined, {
+        ...deps,
+        webSearchFallbackGroq,
+      });
+
+      expect(calls[0]).toBeUndefined();
+    });
+
+    it("falls all the way to the structured no-search model when both compound models fail", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+      const webSearchFallbackGroq = {
+        createChatCompletion: async () => {
+          throw new GroqRateLimitedError();
+        },
+      };
+      const fallbackGroq = {
+        createChatCompletion: async () => ({
+          text: "structured fallback answer",
+          rateLimit: undefined,
+        }),
+      };
+
+      const result = await answerQuestion("what are embeddings?", undefined, {
+        ...deps,
+        webSearchFallbackGroq,
+        fallbackGroq,
+      });
+
+      expect(result.text).toBe("structured fallback answer");
+      expect(result.usedFallback).toBe(true);
+      expect(result.fallbackReason).toBe("rate-limited");
+      expect(result.hasWebSearch).toBe(false);
+    });
+
+    it("propagates the second compound model's error when there's no structured fallback configured", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new GroqRateLimitedError();
+          },
+        },
+      });
+      const webSearchFallbackGroq = {
+        createChatCompletion: async () => {
+          throw new GroqUnavailableError();
+        },
+      };
+
+      await expect(
+        answerQuestion("what are embeddings?", undefined, {
+          ...deps,
+          webSearchFallbackGroq,
+        }),
+      ).rejects.toThrow(GroqUnavailableError);
+    });
+
+    it("doesn't try the second compound model when the primary's error isn't retryable", async () => {
+      const deps = makeDeps({
+        groq: {
+          createChatCompletion: async () => {
+            throw new Error("something unrelated broke");
+          },
+        },
+      });
+      let called = false;
+      const webSearchFallbackGroq = {
+        createChatCompletion: async () => {
+          called = true;
+          return { text: "should never be reached", rateLimit: undefined };
+        },
+      };
+
+      await expect(
+        answerQuestion("what are embeddings?", undefined, {
+          ...deps,
+          webSearchFallbackGroq,
+        }),
+      ).rejects.toThrow("something unrelated broke");
+      expect(called).toBe(false);
+    });
   });
 
   describe("fallback model", () => {
@@ -234,6 +369,7 @@ describe("answerQuestion", () => {
       expect(result.text).toBe("fallback answer");
       expect(result.usedFallback).toBe(true);
       expect(result.fallbackReason).toBe("rate-limited");
+      expect(result.hasWebSearch).toBe(false);
       expect(fallbackMessages).toHaveLength(1);
     });
 

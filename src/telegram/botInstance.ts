@@ -107,6 +107,14 @@ function getBot(): Bot {
           model: env.GROQ_ASK_MODEL,
         }),
         privateFolders: env.PRIVATE_FOLDERS,
+        // A second, distinct compound model — still has web search, and
+        // Groq tracks its daily quota separately from GROQ_ASK_MODEL's (see
+        // GROQ_ASK_FALLBACK_MODEL in env.ts) — tried before giving up web
+        // search entirely and dropping to the structured fallback below.
+        webSearchFallbackGroq: new GroqClient({
+          apiKey: env.GROQ_API_KEY,
+          model: env.GROQ_ASK_FALLBACK_MODEL,
+        }),
         fallbackGroq: structuredGroq,
       },
       saveGroq: structuredGroq,

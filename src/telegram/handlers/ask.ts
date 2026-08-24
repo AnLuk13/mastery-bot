@@ -73,7 +73,9 @@ export function createAskHandler(
         answer.rateLimit,
       );
       const lastIndex = messages.length - 1;
-      const fallbackNotice = answer.usedFallback
+      // A compound->compound fallback still has live web search — nothing
+      // degraded, so no notice. Only the final non-search tier warrants one.
+      const fallbackNotice = !answer.hasWebSearch
         ? formatFallbackNotice(answer.fallbackReason ?? "unavailable")
         : "";
 

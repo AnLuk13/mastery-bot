@@ -142,6 +142,12 @@ const baseSchema = z.object({
   // that compound models reject reasoning_effort outright, so keep this
   // separate from GROQ_MODEL rather than reusing one client for both.
   GROQ_ASK_MODEL: z.string().min(1).default("groq/compound-mini"),
+  // A second, distinct compound model tried before /ask gives up live web
+  // search entirely — verified live that Groq tracks each model's daily
+  // request cap independently (hitting groq/compound-mini's doesn't move
+  // groq/compound's remaining-requests counter), so this is a genuinely
+  // separate budget, not a relabeled retry of the same one.
+  GROQ_ASK_FALLBACK_MODEL: z.string().min(1).default("groq/compound"),
   EDITORS: editorsSchema,
   PRIVATE_FOLDERS: privateFoldersSchema,
   // This app's own repo (not the content repo) — used to trigger its

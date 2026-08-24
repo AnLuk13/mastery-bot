@@ -39,6 +39,7 @@ function makeDeps(
       }),
     },
     privateFolders: overrides.privateFolders ?? [],
+    webSearchFallbackGroq: overrides.webSearchFallbackGroq,
     fallbackGroq: overrides.fallbackGroq,
   };
 }
@@ -346,6 +347,38 @@ describe("createAskHandler", () => {
 
     expect(sendMessageCalls[0].text).toContain("a fallback answer");
     expect(sendMessageCalls[0].text).toMatch(/without live web search/i);
+  });
+
+  it("does not append a fallback notice when the second compound model answers — it still has web search", async () => {
+    const { ctx, sendMessageCalls } = createFakeBotContext({
+      userId: 1,
+      messageText: "what are embeddings?",
+    });
+    const deps = makeDeps({
+      groq: {
+        createChatCompletion: async () => {
+          throw new GroqRateLimitedError(5);
+        },
+      },
+      webSearchFallbackGroq: {
+        createChatCompletion: async () => ({
+          text: "answer from the second compound model",
+          rateLimit: undefined,
+        }),
+      },
+    });
+
+    await createAskHandler(
+      deps,
+      createFakeContentProvider(),
+      createFakeSessionStore(),
+      [],
+    )(ctx);
+
+    expect(sendMessageCalls[0].text).toContain(
+      "answer from the second compound model",
+    );
+    expect(sendMessageCalls[0].text).not.toMatch(/without live web search/i);
   });
 
   it("does not append a fallback notice for a normal successful answer", async () => {

@@ -20,13 +20,17 @@ export interface AnswerQuestionDeps {
   // make it nominally typed, forcing every test fake to be a real instance.
   groq: Pick<GroqClient, "createChatCompletion">;
   privateFolders: readonly PrivateFolderConfig[];
-  // The "ask" model (groq/compound-mini) has a much stricter daily request cap
-  // than /save's model — shared across all users of this bot, since Groq rate
-  // limits are per API key, not per caller. When it's exhausted or otherwise
-  // unavailable, falling back to /save's higher-capacity model still answers
-  // the question (from notes + general knowledge, without live web search)
-  // instead of failing outright. Optional so tests/local dev without a second
-  // model configured keep working exactly as before.
+  // Groq tracks each model's daily request cap independently, not pooled
+  // across models under one API key (verified live: exhausting groq/compound-
+  // mini's 250/day doesn't move groq/compound's remaining-requests counter).
+  // So a second compound model is a genuinely separate 250/day budget, tried
+  // before giving up web search entirely. Optional so tests/local dev without
+  // a second model configured keep working exactly as before.
+  webSearchFallbackGroq?: Pick<GroqClient, "createChatCompletion">;
+  // Only reached once BOTH compound models are exhausted or down. Answers from
+  // notes + general knowledge, without live web search, rather than failing
+  // outright. Optional so tests/local dev without a fallback configured keep
+  // working exactly as before.
   fallbackGroq?: Pick<GroqClient, "createChatCompletion">;
 }
 
@@ -34,10 +38,12 @@ export interface Answer {
   text: string;
   sources: string[];
   rateLimit: RateLimitInfo | undefined;
-  /** True when the primary ask model was unavailable and this answer came from the fallback model instead — without live web search. */
+  /** True when the primary ask model wasn't the one that answered — either fallback tier was used. */
   usedFallback: boolean;
-  /** Why the fallback was used, or undefined when usedFallback is false. "rate-limited" is specifically the daily request cap; "unavailable" covers everything else the primary model can fail with (network error, malformed response, empty completion, a non-rate-limit error status). */
+  /** Why the primary model wasn't used, or undefined when usedFallback is false. "rate-limited" is specifically the daily request cap; "unavailable" covers everything else a Groq call can fail with (network error, malformed response, empty completion, a non-rate-limit error status). */
   fallbackReason: "rate-limited" | "unavailable" | undefined;
+  /** False only when the answer came from the final non-search fallback — the two compound models both have live web search, so falling back between them doesn't lose it. */
+  hasWebSearch: boolean;
 }
 
 function buildSystemPrompt(hasWebSearch: boolean): string {
@@ -100,43 +106,76 @@ export async function answerQuestion(
     : "";
   const userContent = `${documentBlock}${conversationBlock}Retrieved notes:\n\n${buildContextBlock(retrieved)}\n\nQuestion: ${question}`;
 
-  let text: string;
-  let rateLimit: RateLimitInfo | undefined;
-  let usedFallback = false;
-  let fallbackReason: "rate-limited" | "unavailable" | undefined;
-  try {
-    const messages: ChatMessage[] = [
-      { role: "system", content: buildSystemPrompt(true) },
-      { role: "user", content: userContent },
-    ];
-    ({ text, rateLimit } = await deps.groq.createChatCompletion(messages));
-  } catch (error) {
-    if (
-      !deps.fallbackGroq ||
-      !(
-        error instanceof GroqRateLimitedError ||
-        error instanceof GroqUnavailableError
-      )
-    ) {
-      throw error;
-    }
-    // The primary "ask" model is out of daily capacity (or otherwise down) —
-    // still answer from notes + general knowledge rather than fail outright,
-    // just without live web search this turn. If the fallback itself also
-    // fails, that error propagates as-is (describeAskError still maps it to
-    // a sensible message).
-    const fallbackMessages: ChatMessage[] = [
-      { role: "system", content: buildSystemPrompt(false) },
-      { role: "user", content: userContent },
-    ];
-    ({ text, rateLimit } = await deps.fallbackGroq.createChatCompletion(
-      fallbackMessages,
-      { reasoningEffort: "low" },
-    ));
-    usedFallback = true;
-    fallbackReason =
-      error instanceof GroqRateLimitedError ? "rate-limited" : "unavailable";
+  const webSearchMessages: ChatMessage[] = [
+    { role: "system", content: buildSystemPrompt(true) },
+    { role: "user", content: userContent },
+  ];
+  const noSearchMessages: ChatMessage[] = [
+    { role: "system", content: buildSystemPrompt(false) },
+    { role: "user", content: userContent },
+  ];
+
+  // Tried in order until one succeeds: primary compound model, then the
+  // second compound model (still has web search, a genuinely separate daily
+  // quota — see AnswerQuestionDeps), then the structured model as a final,
+  // non-search fallback. Each tier is skipped if its deps weren't configured.
+  const attempts: {
+    groq: Pick<GroqClient, "createChatCompletion">;
+    messages: ChatMessage[];
+    options?: Parameters<GroqClient["createChatCompletion"]>[1];
+    hasWebSearch: boolean;
+  }[] = [{ groq: deps.groq, messages: webSearchMessages, hasWebSearch: true }];
+  if (deps.webSearchFallbackGroq) {
+    attempts.push({
+      groq: deps.webSearchFallbackGroq,
+      messages: webSearchMessages,
+      hasWebSearch: true,
+    });
   }
+  if (deps.fallbackGroq) {
+    attempts.push({
+      groq: deps.fallbackGroq,
+      messages: noSearchMessages,
+      options: { reasoningEffort: "low" },
+      hasWebSearch: false,
+    });
+  }
+
+  let text: string | undefined;
+  let rateLimit: RateLimitInfo | undefined;
+  let hasWebSearch = true;
+  let fallbackReason: "rate-limited" | "unavailable" | undefined;
+
+  for (let i = 0; i < attempts.length; i++) {
+    const attempt = attempts[i];
+    try {
+      ({ text, rateLimit } = await attempt.groq.createChatCompletion(
+        attempt.messages,
+        attempt.options,
+      ));
+      hasWebSearch = attempt.hasWebSearch;
+      break;
+    } catch (error) {
+      const isLastAttempt = i === attempts.length - 1;
+      const isRetryable =
+        error instanceof GroqRateLimitedError ||
+        error instanceof GroqUnavailableError;
+      if (isLastAttempt || !isRetryable) throw error;
+      if (i === 0) {
+        fallbackReason =
+          error instanceof GroqRateLimitedError
+            ? "rate-limited"
+            : "unavailable";
+      }
+      // Otherwise: this tier failed but wasn't the last one — move on to the
+      // next attempt in the loop.
+    }
+  }
+  // Unreachable: the loop above always either assigns `text` and breaks, or
+  // throws before falling out — attempts always has at least one entry.
+  if (text === undefined) throw new GroqUnavailableError();
+
+  const usedFallback = fallbackReason !== undefined;
 
   const sources = [
     ...new Set(
@@ -146,5 +185,12 @@ export async function answerQuestion(
     ),
   ];
 
-  return { text, sources, rateLimit, usedFallback, fallbackReason };
+  return {
+    text,
+    sources,
+    rateLimit,
+    usedFallback,
+    fallbackReason,
+    hasWebSearch,
+  };
 }
