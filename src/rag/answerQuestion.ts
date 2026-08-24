@@ -12,6 +12,14 @@ const TOP_K = 5;
 // shares vocabulary with the AI/app-building chapters without being about them)
 // scored 0.37 — high enough to false-positive at the old 0.35 threshold.
 const CITATION_SCORE_THRESHOLD = 0.45;
+// Unlike the retrieved-notes context (bounded by TOP_K * chunking's own size
+// cap) or the transcript (ASK_CONTEXT_BUDGET in userMessages.ts), the
+// reference document is whatever the user happened to be browsing — no
+// inherent size limit. Confirmed live: an uncapped large document pushed the
+// request past Groq's payload limit for the compound models specifically
+// (413), silently burning through both web-search fallback tiers before the
+// structured model's more permissive limit finally let it through.
+const MAX_REFERENCE_DOCUMENT_CHARS = 2000;
 
 export interface AnswerQuestionDeps {
   embed(text: string): Promise<number[]>;
@@ -98,8 +106,13 @@ export async function answerQuestion(
   // user was just browsing (their ambient "last viewed" session state, not a
   // relevance-scored search hit), so it's framed as something that may or may
   // not bear on the current question rather than as ground truth to cite.
+  const truncatedReferenceContent =
+    referenceDocument &&
+    referenceDocument.content.length > MAX_REFERENCE_DOCUMENT_CHARS
+      ? `${referenceDocument.content.slice(0, MAX_REFERENCE_DOCUMENT_CHARS)}…`
+      : referenceDocument?.content;
   const documentBlock = referenceDocument
-    ? `The user was just viewing this document (it may or may not be relevant to their question) — ${referenceDocument.path}:\n${referenceDocument.content}\n\n`
+    ? `The user was just viewing this document (it may or may not be relevant to their question) — ${referenceDocument.path}:\n${truncatedReferenceContent}\n\n`
     : "";
   const conversationBlock = priorTranscript
     ? `Prior conversation in this thread:\n${priorTranscript}\n\n`

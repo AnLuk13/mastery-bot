@@ -198,6 +198,32 @@ describe("answerQuestion", () => {
     expect(userMessage.content).not.toContain("just viewing");
   });
 
+  it("truncates an oversized reference document instead of sending it whole", async () => {
+    const deps = makeDeps();
+    const hugeContent = "x".repeat(10_000);
+    await answerQuestion("summarize this", undefined, deps, "", {
+      path: "big-notes/huge.md",
+      content: hugeContent,
+    });
+
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).not.toContain(hugeContent);
+    expect(userMessage.content.length).toBeLessThan(hugeContent.length);
+    expect(userMessage.content).toContain("…");
+  });
+
+  it("does not truncate a reference document under the cap", async () => {
+    const deps = makeDeps();
+    await answerQuestion("summarize this", undefined, deps, "", {
+      path: "ai-mastery/05-embeddings.md",
+      content: "short content",
+    });
+
+    const userMessage = deps.capturedMessages[0][1];
+    expect(userMessage.content).toContain("short content");
+    expect(userMessage.content).not.toContain("short content…");
+  });
+
   it("sets usedFallback: false on a normal successful answer", async () => {
     const deps = makeDeps();
     const result = await answerQuestion(
