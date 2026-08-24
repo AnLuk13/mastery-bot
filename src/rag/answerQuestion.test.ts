@@ -206,6 +206,7 @@ describe("answerQuestion", () => {
       deps,
     );
     expect(result.usedFallback).toBe(false);
+    expect(result.fallbackReason).toBeUndefined();
   });
 
   describe("fallback model", () => {
@@ -232,6 +233,7 @@ describe("answerQuestion", () => {
 
       expect(result.text).toBe("fallback answer");
       expect(result.usedFallback).toBe(true);
+      expect(result.fallbackReason).toBe("rate-limited");
       expect(fallbackMessages).toHaveLength(1);
     });
 
@@ -256,6 +258,7 @@ describe("answerQuestion", () => {
       });
 
       expect(result.usedFallback).toBe(true);
+      expect(result.fallbackReason).toBe("unavailable");
     });
 
     it("passes reasoningEffort to the fallback call and omits the web-search claim from its system prompt", async () => {

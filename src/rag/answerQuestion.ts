@@ -34,8 +34,10 @@ export interface Answer {
   text: string;
   sources: string[];
   rateLimit: RateLimitInfo | undefined;
-  /** True when the primary ask model was unavailable (most commonly: its daily request cap was hit) and this answer came from the fallback model instead — without live web search. */
+  /** True when the primary ask model was unavailable and this answer came from the fallback model instead — without live web search. */
   usedFallback: boolean;
+  /** Why the fallback was used, or undefined when usedFallback is false. "rate-limited" is specifically the daily request cap; "unavailable" covers everything else the primary model can fail with (network error, malformed response, empty completion, a non-rate-limit error status). */
+  fallbackReason: "rate-limited" | "unavailable" | undefined;
 }
 
 function buildSystemPrompt(hasWebSearch: boolean): string {
@@ -101,6 +103,7 @@ export async function answerQuestion(
   let text: string;
   let rateLimit: RateLimitInfo | undefined;
   let usedFallback = false;
+  let fallbackReason: "rate-limited" | "unavailable" | undefined;
   try {
     const messages: ChatMessage[] = [
       { role: "system", content: buildSystemPrompt(true) },
@@ -131,6 +134,8 @@ export async function answerQuestion(
       { reasoningEffort: "low" },
     ));
     usedFallback = true;
+    fallbackReason =
+      error instanceof GroqRateLimitedError ? "rate-limited" : "unavailable";
   }
 
   const sources = [
@@ -141,5 +146,5 @@ export async function answerQuestion(
     ),
   ];
 
-  return { text, sources, rateLimit, usedFallback };
+  return { text, sources, rateLimit, usedFallback, fallbackReason };
 }

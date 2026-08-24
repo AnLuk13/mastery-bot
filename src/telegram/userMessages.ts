@@ -72,9 +72,15 @@ export function describeAskError(error: unknown): string {
   return "⚠️ Something went wrong answering that. Please try again.";
 }
 
-/** Appended to an /ask answer that came from the fallback model — visible so a missing-web-search answer doesn't look like the model just declined to search. */
-export function formatFallbackNotice(): string {
-  return "\n\n⚠️ Answered without live web search — today's request limit for that was reached.";
+/** Appended to an /ask answer that came from the fallback model — visible so a missing-web-search answer doesn't look like the model just declined to search. Distinguishes an actual daily-limit hit from any other reason the primary model failed (network error, malformed response, empty completion, etc.) — those aren't a "limit," and saying so was misleading. */
+export function formatFallbackNotice(
+  reason: "rate-limited" | "unavailable",
+): string {
+  const cause =
+    reason === "rate-limited"
+      ? "today's request limit for that was reached"
+      : "it had a temporary problem";
+  return `\n\n⚠️ Answered without live web search — ${cause}.`;
 }
 
 /** Formats a snapshot of Groq's rate limits (as of the answer that carried this button) for a toast alert. */

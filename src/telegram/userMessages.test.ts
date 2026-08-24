@@ -50,10 +50,16 @@ describe("describeAskError", () => {
 });
 
 describe("formatFallbackNotice", () => {
-  it("mentions live web search and today's limit", () => {
-    const notice = formatFallbackNotice();
+  it("mentions today's limit when rate-limited", () => {
+    const notice = formatFallbackNotice("rate-limited");
     expect(notice).toMatch(/web search/i);
     expect(notice).toMatch(/limit/i);
+  });
+
+  it("doesn't claim a limit was hit for a generic unavailable failure", () => {
+    const notice = formatFallbackNotice("unavailable");
+    expect(notice).toMatch(/web search/i);
+    expect(notice).not.toMatch(/limit/i);
   });
 });
 

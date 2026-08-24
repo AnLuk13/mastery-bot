@@ -73,7 +73,9 @@ export function createAskHandler(
         answer.rateLimit,
       );
       const lastIndex = messages.length - 1;
-      const fallbackNotice = answer.usedFallback ? formatFallbackNotice() : "";
+      const fallbackNotice = answer.usedFallback
+        ? formatFallbackNotice(answer.fallbackReason ?? "unavailable")
+        : "";
 
       for (let i = 0; i < messages.length; i++) {
         const { text, parseMode } = messages[i];
