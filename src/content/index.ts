@@ -31,6 +31,7 @@ export { compareContentEntries, naturalCompare } from "./sort";
 export { isPathVisible } from "./visibility";
 export type { PrivateFolderConfig } from "./visibility";
 export type {
+  CommitInfo,
   ContentEntry,
   ContentProvider,
   DirectoryEntry,

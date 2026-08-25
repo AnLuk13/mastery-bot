@@ -17,6 +17,24 @@ export const TOO_LONG_MESSAGE =
   "⚠️ That item's path is too long to open right now.";
 export const SEARCH_USAGE_MESSAGE = "🔎 Usage: /search <query>";
 
+const MAX_COMMIT_MESSAGE_LENGTH = 60;
+
+/** The "last updated" line shown under a folder's title (see handlers/navigation.ts) — never fails on a malformed date, just omits it. */
+export function formatCommitLine(commit: {
+  message: string;
+  date: string;
+}): string {
+  const message =
+    commit.message.length > MAX_COMMIT_MESSAGE_LENGTH
+      ? `${commit.message.slice(0, MAX_COMMIT_MESSAGE_LENGTH)}…`
+      : commit.message;
+  const parsedDate = new Date(commit.date);
+  const dateText = Number.isNaN(parsedDate.getTime())
+    ? undefined
+    : parsedDate.toISOString().slice(0, 10);
+  return dateText ? `🕓 ${message} — ${dateText}` : `🕓 ${message}`;
+}
+
 export function formatSearchTitle(query: string): string {
   return `🔎 Search: ${query}`;
 }

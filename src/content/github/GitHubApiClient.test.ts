@@ -162,6 +162,65 @@ describe("GitHubApiClient.getBranchHeadSha", () => {
   });
 });
 
+describe("GitHubApiClient.getLatestCommit", () => {
+  it("returns undefined when the path has no tracked commit history", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    const commit = await client.getLatestCommit(
+      "networking-mastery/01-tcp.md",
+      "main",
+    );
+    expect(commit).toBeUndefined();
+  });
+
+  it("returns the most recent commit that touched a file", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await client.createOrUpdateFile(
+      "networking-mastery/01-tcp.md",
+      "# TCP\nRevised.",
+      "save: revise tcp",
+      "main",
+      "sha:networking-mastery/01-tcp.md",
+    );
+
+    const commit = await client.getLatestCommit(
+      "networking-mastery/01-tcp.md",
+      "main",
+    );
+    expect(commit?.message).toBe("save: revise tcp");
+    expect(commit?.date).toBeTruthy();
+  });
+
+  it("returns the most recent commit that touched anything under a directory", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await client.createOrUpdateFile(
+      "networking-mastery/protocols/new.md",
+      "# New",
+      "add new protocol note",
+      "main",
+    );
+
+    const commit = await client.getLatestCommit("networking-mastery", "main");
+    expect(commit?.message).toBe("add new protocol note");
+  });
+
+  it("takes only the first line of a multi-line commit message", async () => {
+    const client = makeClient(createMockGitHubFetch(fixture));
+    await client.createOrUpdateFile(
+      "networking-mastery/01-tcp.md",
+      "# TCP\nRevised.",
+      "save: revise tcp\n\nLonger body explaining why.",
+      "main",
+      "sha:networking-mastery/01-tcp.md",
+    );
+
+    const commit = await client.getLatestCommit(
+      "networking-mastery/01-tcp.md",
+      "main",
+    );
+    expect(commit?.message).toBe("save: revise tcp");
+  });
+});
+
 describe("GitHubApiClient write flow", () => {
   it("creates a new file and advances the branch head", async () => {
     const client = makeClient(createMockGitHubFetch(fixture));

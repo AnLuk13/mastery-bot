@@ -34,8 +34,23 @@ export interface SearchResult {
   snippet?: string;
 }
 
+export interface CommitInfo {
+  /** First line only — commit bodies aren't shown anywhere in the bot. */
+  message: string;
+  /** ISO 8601. */
+  date: string;
+}
+
 export interface ContentProvider {
   listDirectory(path: string): Promise<ContentEntry[]>;
   getDocument(path: string): Promise<Document>;
   search(query: string): Promise<SearchResult[]>;
+  /**
+   * The most recent commit that touched `path`, if the provider has commit
+   * history to offer — only GitHubContentProvider implements this;
+   * LocalFilesystemContentProvider has no commit concept, so callers must
+   * treat this as optional (`provider.getLatestCommit?.(path)`) and degrade
+   * gracefully when it's absent or returns undefined.
+   */
+  getLatestCommit?(path: string): Promise<CommitInfo | undefined>;
 }

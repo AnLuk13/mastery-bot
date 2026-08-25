@@ -41,6 +41,65 @@ describe("renderDirectory", () => {
     expect(updateMessageCalls[0].text).toBe("📁 protocols");
   });
 
+  it("appends the latest commit line under a folder's title when the provider supports it", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+      getLatestCommit: async () => ({
+        message: "Add DNS caching section",
+        date: "2026-08-20T10:00:00Z",
+      }),
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "networking-mastery", []);
+
+    expect(updateMessageCalls[0].text).toBe(
+      "📁 networking-mastery\n🕓 Add DNS caching section — 2026-08-20",
+    );
+  });
+
+  it("omits the commit line entirely when the provider doesn't support commit history (e.g. local dev)", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "networking-mastery", []);
+
+    expect(updateMessageCalls[0].text).toBe("📁 networking-mastery");
+  });
+
+  it("omits the commit line rather than failing the whole render when fetching it throws", async () => {
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+      getLatestCommit: async () => {
+        throw new Error("network blip");
+      },
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "networking-mastery", []);
+
+    expect(updateMessageCalls[0].text).toBe("📁 networking-mastery");
+  });
+
+  it("never fetches or shows a commit line for the root menu", async () => {
+    let called = false;
+    const provider = createFakeContentProvider({
+      listDirectory: async () => [],
+      getLatestCommit: async () => {
+        called = true;
+        return { message: "should not be requested", date: "2026-08-20" };
+      },
+    });
+    const { ctx, updateMessageCalls } = createFakeBotContext();
+
+    await renderDirectory(ctx, provider, "", []);
+
+    expect(called).toBe(false);
+    expect(updateMessageCalls[0].text).toBe("📚 Mastery");
+  });
+
   it("requests exactly the requested path from the provider, not the whole tree", async () => {
     let requestedPath: string | undefined;
     const provider = createFakeContentProvider({

@@ -6,6 +6,7 @@ import { joinCanonical, normalizeRelativePath } from "./paths";
 import { buildSnippet } from "./snippet";
 import { compareContentEntries } from "./sort";
 import type {
+  CommitInfo,
   ContentEntry,
   ContentProvider,
   Document,
@@ -188,6 +189,12 @@ export class GitHubContentProvider implements ContentProvider {
     }
 
     return results;
+  }
+
+  async getLatestCommit(inputPath: string): Promise<CommitInfo | undefined> {
+    const canonical = normalizeRelativePath(inputPath);
+    const githubPath = this.toGitHubPath(canonical);
+    return this.client.getLatestCommit(githubPath, this.branch);
   }
 
   private toGitHubPath(canonical: string): string {

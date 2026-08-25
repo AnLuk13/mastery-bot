@@ -7,6 +7,7 @@ import {
   ContentProviderUnavailableError,
   InvalidPathError,
 } from "./errors";
+import { GitHubApiClient } from "./github/GitHubApiClient";
 import { GitHubContentProvider } from "./GitHubContentProvider";
 import {
   createMockGitHubFetch,
@@ -160,6 +161,36 @@ describe("GitHubContentProvider.getDocument", () => {
     await expect(provider.getDocument("../outside.md")).rejects.toThrow(
       InvalidPathError,
     );
+  });
+});
+
+describe("GitHubContentProvider.getLatestCommit", () => {
+  it("returns undefined for a path with no tracked commit history", async () => {
+    const provider = makeProvider(createMockGitHubFetch(rootFixture));
+    const commit = await provider.getLatestCommit("networking-mastery");
+    expect(commit).toBeUndefined();
+  });
+
+  it("returns the most recent commit touching the path, respecting the content-path prefix", async () => {
+    const fetchImpl = createMockGitHubFetch(dir({ mastery: rootFixture }));
+    const client = new GitHubApiClient({
+      owner: "test-owner",
+      repo: "test-repo",
+      fetchImpl,
+    });
+    await client.createOrUpdateFile(
+      "mastery/networking-mastery/01-tcp.md",
+      "# TCP\nRevised.",
+      "save: revise tcp",
+      "main",
+      "sha:mastery/networking-mastery/01-tcp.md",
+    );
+
+    const provider = makeProvider(fetchImpl, "mastery");
+    const commit = await provider.getLatestCommit(
+      "networking-mastery/01-tcp.md",
+    );
+    expect(commit?.message).toBe("save: revise tcp");
   });
 });
 

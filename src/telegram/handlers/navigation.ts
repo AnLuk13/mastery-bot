@@ -2,23 +2,44 @@ import { InlineKeyboard } from "grammy";
 import {
   ContentNotFoundError,
   isPathVisible,
+  type CommitInfo,
   type ContentProvider,
   type PrivateFolderConfig,
 } from "@/content";
 import { encodeNavigateCallbackData, type CleanupHint } from "../callbackData";
 import { buildDirectoryKeyboard } from "../keyboards/navigation";
 import type { BotContext } from "../types";
-import { describeContentError } from "../userMessages";
+import { describeContentError, formatCommitLine } from "../userMessages";
 
 const homeOnlyKeyboard = new InlineKeyboard().text(
   "🏠 Home",
   encodeNavigateCallbackData("directory", ""),
 );
 
-function directoryTitle(canonicalPath: string): string {
+/**
+ * Best-effort: only GitHubContentProvider implements getLatestCommit (see
+ * ContentProvider), and even there a network hiccup shouldn't turn "open a
+ * folder" into an error — the title still renders fine without it.
+ */
+async function fetchLatestCommit(
+  provider: ContentProvider,
+  canonicalPath: string,
+): Promise<CommitInfo | undefined> {
+  try {
+    return await provider.getLatestCommit?.(canonicalPath);
+  } catch {
+    return undefined;
+  }
+}
+
+function directoryTitle(
+  canonicalPath: string,
+  commit: CommitInfo | undefined,
+): string {
   if (canonicalPath === "") return "📚 Mastery";
   const segments = canonicalPath.split("/");
-  return `📁 ${segments[segments.length - 1]}`;
+  const title = `📁 ${segments[segments.length - 1]}`;
+  return commit ? `${title}\n${formatCommitLine(commit)}` : title;
 }
 
 const MAX_ROOT_COLLAPSE_DEPTH = 10;
@@ -86,17 +107,18 @@ export async function renderDirectory(
     if (!isPathVisible(canonicalPath, ctx.userId, privateFolders)) {
       throw new ContentNotFoundError(canonicalPath);
     }
-    const entries =
+    const [entries, commit] = await Promise.all([
       canonicalPath === ""
-        ? await resolveRootEntries(provider, ctx.userId, privateFolders)
-        : await listVisible(
-            provider,
-            canonicalPath,
-            ctx.userId,
-            privateFolders,
-          );
+        ? resolveRootEntries(provider, ctx.userId, privateFolders)
+        : listVisible(provider, canonicalPath, ctx.userId, privateFolders),
+      // No single meaningful path to attach a commit to at the (possibly
+      // collapsed) root — see directoryTitle, which never shows one there.
+      canonicalPath === ""
+        ? Promise.resolve(undefined)
+        : fetchLatestCommit(provider, canonicalPath),
+    ]);
     const keyboard = buildDirectoryKeyboard(entries, canonicalPath);
-    await ctx.updateMessage(directoryTitle(canonicalPath), keyboard);
+    await ctx.updateMessage(directoryTitle(canonicalPath, commit), keyboard);
   } catch (error) {
     await ctx.updateMessage(describeContentError(error), homeOnlyKeyboard);
   }

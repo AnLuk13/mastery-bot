@@ -12,6 +12,7 @@ import {
   formatAdminUserAdded,
   formatAdminUserRemoved,
   formatClarifyPrompt,
+  formatCommitLine,
   formatFallbackNotice,
   formatRateLimitMessage,
   formatSaveSuccess,
@@ -60,6 +61,30 @@ describe("formatFallbackNotice", () => {
     const notice = formatFallbackNotice("unavailable");
     expect(notice).toMatch(/web search/i);
     expect(notice).not.toMatch(/limit/i);
+  });
+});
+
+describe("formatCommitLine", () => {
+  it("shows the message and a date-only ISO date", () => {
+    expect(
+      formatCommitLine({
+        message: "Add DNS caching section",
+        date: "2026-08-20T10:00:00Z",
+      }),
+    ).toBe("🕓 Add DNS caching section — 2026-08-20");
+  });
+
+  it("truncates a long commit message", () => {
+    const longMessage = "x".repeat(100);
+    const line = formatCommitLine({ message: longMessage, date: "2026-08-20" });
+    expect(line).toContain("…");
+    expect(line.length).toBeLessThan(longMessage.length);
+  });
+
+  it("omits the date rather than showing an invalid one", () => {
+    expect(
+      formatCommitLine({ message: "Add DNS caching section", date: "" }),
+    ).toBe("🕓 Add DNS caching section");
   });
 });
 

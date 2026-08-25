@@ -139,10 +139,14 @@ export function createMockGitHubFetch(
   const treePrefix = `${apiRoot}/git/trees/`;
   const blobPrefix = `${apiRoot}/git/blobs/`;
   const refPrefix = `${apiRoot}/git/ref/heads/`;
+  const commitsPrefix = `${apiRoot}/commits`;
 
   let headSha = "commit-0";
   const history = new Map<string, MockDirNode>([[headSha, cloneTree(root)]]);
   let commitCounter = 0;
+  // Chronological (oldest first); getLatestCommit reverses to find the most
+  // recent entry whose path matches or is nested under the queried path.
+  const commitLog: { path: string; message: string; date: string }[] = [];
 
   const mockFetch = async (
     input: string | URL | Request,
@@ -201,6 +205,20 @@ export function createMockGitHubFetch(
       });
     }
 
+    if (rawUrl.startsWith(commitsPrefix)) {
+      const url = new URL(rawUrl);
+      const queryPath = url.searchParams.get("path") ?? "";
+      const matches = commitLog.filter(
+        (entry) =>
+          entry.path === queryPath || entry.path.startsWith(`${queryPath}/`),
+      );
+      const latest = matches[matches.length - 1];
+      if (!latest) return jsonResponse(200, []);
+      return jsonResponse(200, [
+        { commit: { message: latest.message, author: { date: latest.date } } },
+      ]);
+    }
+
     if (rawUrl.startsWith(contentsPrefix)) {
       const url = new URL(rawUrl);
       const rawPath = url.pathname.slice(
@@ -227,6 +245,11 @@ export function createMockGitHubFetch(
         commitCounter++;
         headSha = `commit-${commitCounter}`;
         history.set(headSha, cloneTree(root));
+        commitLog.push({
+          path: targetPath,
+          message: body.message ?? "",
+          date: new Date(commitCounter * 60_000).toISOString(),
+        });
 
         return jsonResponse(200, {
           content: { sha: `sha:${targetPath}` },
@@ -247,6 +270,11 @@ export function createMockGitHubFetch(
         commitCounter++;
         headSha = `commit-${commitCounter}`;
         history.set(headSha, cloneTree(root));
+        commitLog.push({
+          path: targetPath,
+          message: body.message ?? "",
+          date: new Date(commitCounter * 60_000).toISOString(),
+        });
 
         return jsonResponse(200, { commit: { sha: headSha } });
       }

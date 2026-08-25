@@ -54,6 +54,16 @@ const refResponseSchema = z.object({
   object: z.object({ sha: z.string() }),
 });
 
+const commitListItemSchema = z.object({
+  commit: z.object({
+    message: z.string(),
+    author: z.object({ date: z.string() }).optional(),
+    committer: z.object({ date: z.string() }).optional(),
+  }),
+});
+
+const commitListResponseSchema = z.array(commitListItemSchema);
+
 const putContentsResponseSchema = z.object({
   content: z.object({ sha: z.string() }),
   commit: z.object({ sha: z.string() }),
@@ -64,6 +74,13 @@ export type GitHubTreeEntry = z.infer<typeof treeEntrySchema>;
 export interface GitHubTreeResult {
   entries: GitHubTreeEntry[];
   truncated: boolean;
+}
+
+export interface LatestCommit {
+  /** First line only — commit bodies aren't shown in the directory title. */
+  message: string;
+  /** ISO 8601, as returned by GitHub (author date, not committer date). */
+  date: string;
 }
 
 export interface PutFileResult {
@@ -188,6 +205,38 @@ export class GitHubApiClient {
       );
     }
     return parsed.data.object.sha;
+  }
+
+  /**
+   * The most recent commit that touched `githubPath` (file or directory) on
+   * `ref`, or undefined if the path has no commit history (shouldn't happen
+   * for a path that exists, but GitHub returns an empty array rather than a
+   * 404 for that case, so it's handled rather than assumed away).
+   */
+  async getLatestCommit(
+    githubPath: string,
+    ref: string,
+  ): Promise<LatestCommit | undefined> {
+    const url = new URL(
+      `${GITHUB_API_BASE}/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}/commits`,
+    );
+    url.searchParams.set("path", githubPath);
+    url.searchParams.set("sha", ref);
+    url.searchParams.set("per_page", "1");
+
+    const json = await this.requestJson(url.toString(), githubPath);
+    const parsed = commitListResponseSchema.safeParse(json);
+    if (!parsed.success) {
+      throw new ContentProviderUnavailableError(
+        "GitHub returned an unexpected commits response shape",
+      );
+    }
+    const [latest] = parsed.data;
+    if (!latest) return undefined;
+    return {
+      message: latest.commit.message.split("\n")[0],
+      date: latest.commit.author?.date ?? latest.commit.committer?.date ?? "",
+    };
   }
 
   /**

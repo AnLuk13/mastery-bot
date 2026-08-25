@@ -105,6 +105,9 @@ export function createFakeContentProvider(
         throw new ContentNotFoundError(path);
       }),
     search: overrides.search ?? (async () => []),
+    // Absent by default, same as LocalFilesystemContentProvider (no commit
+    // concept) — pass a fake explicitly to test GitHub-provider behavior.
+    getLatestCommit: overrides.getLatestCommit,
   };
 }
 
