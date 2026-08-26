@@ -20,13 +20,17 @@ function decideSystemPrompt(ctx: SaveRequestContext): string {
     ctx.clarifyRound > 0
       ? 'This is the second attempt: you already asked a clarifying question and the user answered it. You MUST return "write", "reorganize", or "delete" this time — never "clarify" again, the user has already given you what you asked for. Whichever of those is genuinely right, use it directly — on this attempt it applies immediately without asking again, since the user already gave their input for this round.'
       : "This is the first attempt.";
+  const newFileInstruction =
+    ctx.verbatimContent !== undefined
+      ? 'Otherwise, respond with action "write", a NEW path, and isNewFile: true. Do not include content — this request came from an uploaded file, its exact content is already known separately and will be saved as-is.'
+      : 'Otherwise, respond with action "write", a NEW path, isNewFile: true, and the full Markdown content directly. Keep it concise — this is a saved note, not a textbook chapter: a "# Title" line plus a few sentences or bullets is often enough.';
 
   return `You help maintain a personal Markdown knowledge base for one editor, stored under the folder "${ctx.editorFolder}/". You'll be given a save request (a typed note, or a description alongside uploaded file content) and a list of that editor's existing document paths.
 
 Decide one of:
 1. If the request is clear enough, decide where it belongs:
    - If it fits an EXISTING file well (same specific topic), respond with action "write", that exact existing path, and isNewFile: false. Do not include content — you have not seen that file's current content yet, a separate step handles merging it in.
-   - Otherwise, respond with action "write", a NEW path, isNewFile: true, and the full Markdown content directly. Keep it concise — this is a saved note, not a textbook chapter: a "# Title" line plus a few sentences or bullets is often enough.
+   - ${newFileInstruction}
    - New-file paths MUST use a topic subfolder: "${ctx.editorFolder}/<topic>/<file>.md", never a file directly under "${ctx.editorFolder}/" itself. Pick <topic> from the request's actual subject (e.g. a work meeting note might be "${ctx.editorFolder}/meetings/...", a networking note "${ctx.editorFolder}/networking/..."). If existing documents already establish a topic structure, follow it and reuse a matching topic folder over inventing a near-duplicate one; if there are none yet, choose a sensible topic name yourself — a knowledge base organized by subject is the whole point, so never take the shortcut of skipping the subfolder just because nothing exists yet.
    - Every path must start with "${ctx.editorFolder}/", include at least one subfolder, and end in .md.
 2. If the request is for a genuinely NEW, separate note, and its topic clearly overlaps with an EXISTING file that sits directly under "${ctx.editorFolder}/" with NO topic subfolder of its own (i.e. it predates any folder organization), you may instead propose grouping them: respond with action "reorganize", moveFrom (that exact existing flat path), moveTo (a new path for it inside a shared topic subfolder), newPath (a path for the NEW note inside that same subfolder), the new note's full Markdown content, and a commitMessage for the new note. On a first attempt this only proposes the move, shown to the user to confirm before anything happens; on a second attempt (see below) it applies directly. Use it sparingly and only when the two are clearly the same subject; never for a file that's already inside a subfolder, and never when the request is actually just editing that existing file itself (that's still action "write" with isNewFile: false, per #1).
@@ -43,12 +47,25 @@ Respond with ONLY a JSON object matching one of:
 {"action":"delete","paths":["..."],"commitMessage":"..."}`;
 }
 
+// Groq's API rejects an oversized request body outright (413), independent
+// of the model's token context window — this bit an uploaded file's full raw
+// content once it was embedded here uncapped (see answerQuestion.ts's
+// MAX_REFERENCE_DOCUMENT_CHARS for the same failure mode hit earlier). Only
+// a preview is needed here for path/topic classification — when this came
+// from an upload, the exact original content is saved verbatim regardless
+// (see verbatimContent).
+const MAX_SAVE_REQUEST_PREVIEW_CHARS = 3000;
+
 function buildUserMessage(ctx: SaveRequestContext): string {
   const entries =
     ctx.existingEntries.length > 0
       ? ctx.existingEntries.join("\n")
       : "(no existing documents yet)";
-  return `Existing documents:\n${entries}\n\nSave request:\n${ctx.request}`;
+  const requestPreview =
+    ctx.request.length > MAX_SAVE_REQUEST_PREVIEW_CHARS
+      ? ctx.request.slice(0, MAX_SAVE_REQUEST_PREVIEW_CHARS) + "…"
+      : ctx.request;
+  return `Existing documents:\n${entries}\n\nSave request:\n${requestPreview}`;
 }
 
 async function callGroqJson(
@@ -102,7 +119,11 @@ function validateWriteDecision(
   data: Extract<SaveDecision, { action: "write" }>,
   ctx: SaveRequestContext,
 ): SaveDecision {
-  if (data.isNewFile && data.content === undefined) {
+  if (
+    data.isNewFile &&
+    data.content === undefined &&
+    ctx.verbatimContent === undefined
+  ) {
     throw new GroqUnavailableError(
       "Groq marked this a new file but returned no content",
     );
@@ -118,7 +139,13 @@ function validateWriteDecision(
       "Groq proposed a new file directly under the editor's folder instead of a topic subfolder",
     );
   }
-  return { ...data, path: normalizedPath };
+  // An upload's exact original content always wins over whatever the model
+  // returned (or was asked not to return) — see SaveRequestContext.verbatimContent.
+  const content =
+    data.isNewFile && ctx.verbatimContent !== undefined
+      ? ctx.verbatimContent
+      : data.content;
+  return { ...data, path: normalizedPath, content };
 }
 
 function validateReorganizeDecision(

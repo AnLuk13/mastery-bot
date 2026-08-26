@@ -135,6 +135,72 @@ describe("decideSave", () => {
   });
 });
 
+describe("decideSave with verbatimContent (uploaded file)", () => {
+  it("accepts a new-file decision with no content from the model, using verbatimContent instead", async () => {
+    const groq = fakeGroq({
+      action: "write",
+      path: "antonio/networking/keepalive.md",
+      isNewFile: true,
+      commitMessage: "save: keepalive note",
+    });
+    const decision = await decideSave(
+      { ...baseCtx, verbatimContent: "# Keepalive\nfull original text" },
+      groq,
+    );
+    expect(decision).toMatchObject({
+      action: "write",
+      isNewFile: true,
+      content: "# Keepalive\nfull original text",
+    });
+  });
+
+  it("prefers verbatimContent over any content the model returns anyway", async () => {
+    const groq = fakeGroq({
+      action: "write",
+      path: "antonio/networking/keepalive.md",
+      isNewFile: true,
+      content: "model-authored content",
+      commitMessage: "save: keepalive note",
+    });
+    const decision = await decideSave(
+      { ...baseCtx, verbatimContent: "original upload content" },
+      groq,
+    );
+    expect(decision).toMatchObject({ content: "original upload content" });
+  });
+
+  it("truncates a large request in the prompt sent to Groq, without truncating the saved content", async () => {
+    const largeUpload = "y".repeat(20_000);
+    const capturedMessages: unknown[] = [];
+    const groq = {
+      createChatCompletion: async (messages: unknown) => {
+        capturedMessages.push(messages);
+        return {
+          text: JSON.stringify({
+            action: "write",
+            path: "antonio/general/big.md",
+            isNewFile: true,
+            commitMessage: "save: big",
+          }),
+          rateLimit: undefined,
+        };
+      },
+    };
+    const decision = await decideSave(
+      {
+        ...baseCtx,
+        request: `Uploaded file "big.md":\n${largeUpload}`,
+        verbatimContent: largeUpload,
+      },
+      groq,
+    );
+
+    const promptSize = JSON.stringify(capturedMessages).length;
+    expect(promptSize).toBeLessThan(largeUpload.length);
+    expect(decision).toMatchObject({ content: largeUpload });
+  });
+});
+
 describe("decideSave reorganize", () => {
   const flatCtx: SaveRequestContext = {
     editorFolder: "andreea",

@@ -203,8 +203,13 @@ describe("createSaveHandler", () => {
 
     await createSaveHandler(baseDeps({ groq, sessionStore }))(ctx);
 
+    // The classification prompt is capped (see MAX_SAVE_REQUEST_PREVIEW_CHARS
+    // in decideSave.ts, a deliberate limit to avoid a 413 from Groq on a
+    // large request) — but it's a cap on the full stored original, not a
+    // fallback to the short message echo.
     const prompt = JSON.stringify(capturedMessages);
-    expect(prompt).toContain("x".repeat(5000));
+    expect(prompt).toContain("x".repeat(1000));
+    expect(prompt).not.toContain("truncated echo, much shorter");
   });
 
   it("rejects an unsupported uploaded file type", async () => {
@@ -244,6 +249,42 @@ describe("createSaveHandler", () => {
     const prompt = JSON.stringify(capturedMessages);
     expect(prompt).toContain("raw file content");
     expect(prompt).toContain("note.txt");
+  });
+
+  it("writes a large uploaded file's content verbatim, without asking Groq to reproduce it (avoids the 413 an uncapped prompt hit)", async () => {
+    const { writer, writes } = createFakeContentWriter();
+    const capturedMessages: unknown[] = [];
+    const largeUpload = "# Notes\n" + "x".repeat(20_000);
+    const groq = {
+      createChatCompletion: async (messages: unknown) => {
+        capturedMessages.push(messages);
+        // The model is told not to include content for an upload-derived new
+        // file — this response reflects that, omitting it entirely.
+        return {
+          text: JSON.stringify({
+            action: "write",
+            path: "antonio/general/big-upload.md",
+            isNewFile: true,
+            commitMessage: "save: big upload",
+          }),
+          rateLimit: undefined,
+        };
+      },
+    };
+    const { ctx } = createFakeBotContext({
+      userId: 712059530,
+      document: { fileId: "f1", fileName: "big.md", mimeType: "text/markdown" },
+      downloadDocument: async () => largeUpload,
+    });
+
+    await createSaveHandler(baseDeps({ contentWriter: writer, groq }))(ctx);
+
+    // The prompt sent to Groq stays well under the full upload's size...
+    const promptSize = JSON.stringify(capturedMessages).length;
+    expect(promptSize).toBeLessThan(largeUpload.length);
+    // ...but the file actually written keeps every byte of the original.
+    expect(writes).toHaveLength(1);
+    expect(writes[0].content).toBe(largeUpload);
   });
 
   it("combines the echoed clarify context with the reply as a round-2 request", async () => {

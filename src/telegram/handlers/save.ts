@@ -204,6 +204,7 @@ async function performSave(
   folder: string,
   request: string,
   clarifyRound: number,
+  verbatimContent?: string,
 ): Promise<void> {
   await ctx.sendTyping();
 
@@ -213,7 +214,13 @@ async function performSave(
       folder,
     );
     const decision = await decideSave(
-      { editorFolder: folder, request, existingEntries, clarifyRound },
+      {
+        editorFolder: folder,
+        request,
+        existingEntries,
+        clarifyRound,
+        verbatimContent,
+      },
       deps.groq,
     );
 
@@ -321,6 +328,8 @@ export function createSaveHandler(deps: SaveDeps) {
       }
       request = `Uploaded file "${ctx.document.fileName}":\n${fileContent}`;
       clarifyRound = 0;
+      await performSave(ctx, deps, folder, request, clarifyRound, fileContent);
+      return;
     } else if (isClarifyContinuation(ctx.replyToMessageText)) {
       // Prefer the full, uncapped original stored server-side (see
       // Session.pendingSaveRequest) — falls back to the message's own

@@ -6,6 +6,15 @@ export interface SaveRequestContext {
   editorFolder: string;
   /** The typed note, or a description alongside uploaded file content. */
   request: string;
+  /**
+   * Set when `request` originated from an uploaded .txt/.md file: the file's
+   * exact original content. When present, decideSave() never asks the model
+   * to reproduce content for a new file (a large upload wouldn't survive the
+   * 700-token completion cap anyway) — the caller writes this verbatim
+   * instead, and only `request` (truncated for the classification prompt) is
+   * used to help the model pick a path.
+   */
+  verbatimContent?: string;
   /** Canonical paths of this editor's existing documents, for the model to fit new material into existing structure. */
   existingEntries: readonly string[];
   /** 0 on a fresh request; 1 after one round of clarifying questions has already been asked. */
