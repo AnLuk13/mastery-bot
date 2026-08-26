@@ -291,6 +291,7 @@ async function performSave(
 
     await writeAndReport(ctx, deps, decision.path, content, commitMessage);
   } catch (error) {
+    console.error("Save failed:", error);
     await ctx.sendMessage(describeSaveError(error));
   }
 }
@@ -440,6 +441,7 @@ export function createReorganizeConfirmHandler(deps: SaveDeps) {
 
       await executeReorganize(ctx, deps, proposal);
     } catch (error) {
+      console.error("Reorganize confirm failed:", error);
       await ctx.sendMessage(describeSaveError(error));
     }
   };
@@ -485,6 +487,7 @@ export function createDeleteConfirmHandler(deps: SaveDeps) {
     try {
       await executeDelete(ctx, deps, proposal);
     } catch (error) {
+      console.error("Delete confirm failed:", error);
       await ctx.sendMessage(describeSaveError(error));
     }
   };
@@ -511,6 +514,7 @@ export function createRevertHandler(
       );
       await ctx.updateMessage(formatRevertSuccess(target.path));
     } catch (error) {
+      console.error("Revert failed:", error);
       await ctx.sendMessage(describeSaveError(error));
     }
   };
